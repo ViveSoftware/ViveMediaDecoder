@@ -1,0 +1,584 @@
+//========= Copyright 2015-2016, HTC Corporation. All rights reserved. ===========
+
+using UnityEngine;
+using UnityEngine.Events;
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+namespace HTC.UnityPlugin.Multimedia
+{
+	[RequireComponent(typeof(MeshRenderer))]
+	public class MediaDecoder : MonoBehaviour
+	{
+		private const string NATIVE_LIBRARY_NAME = "MediaDecoder";
+		
+		[DllImport (NATIVE_LIBRARY_NAME)]
+		private static extern int nativeCreateDecoderAsync(string filePath, ref int id);
+
+		[DllImport (NATIVE_LIBRARY_NAME)]
+		private static extern int nativeGetDecoderState(int id);
+
+		[DllImport (NATIVE_LIBRARY_NAME)]
+		private static extern bool nativeStartDecoding(int id);
+
+		[DllImport (NATIVE_LIBRARY_NAME)]
+		private static extern void nativeDestroyDecoder (int id);
+
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern bool nativeIsBufferFull(int id);
+
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern bool nativeIsBufferEmpty(int id);
+
+        [DllImport (NATIVE_LIBRARY_NAME)]
+		private static extern void nativeSetSeekTime (int id, float sec);
+
+		[DllImport (NATIVE_LIBRARY_NAME)]
+		private static extern bool nativeIsSeekOver(int id);
+
+		[DllImport (NATIVE_LIBRARY_NAME)]
+		private static extern bool nativeIsVideoEnabled (int id);
+
+		[DllImport (NATIVE_LIBRARY_NAME)]
+		private static extern void nativeGetVideoFormat(int id, ref int width, ref int height, ref float totalTime);
+		
+		[DllImport (NATIVE_LIBRARY_NAME)]
+		private static extern void nativeCreateTexture(int id, ref IntPtr tex0, ref IntPtr tex1, ref IntPtr tex2);
+
+		[DllImport (NATIVE_LIBRARY_NAME)]
+		private static extern bool nativeIsAudioEnabled (int id);
+		
+		[DllImport (NATIVE_LIBRARY_NAME)]
+		private static extern float nativeGetAudioData(int id, ref IntPtr output, ref int frameSize);
+
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern void nativeFreeAudioData(int id);
+
+        [DllImport (NATIVE_LIBRARY_NAME)]
+		private static extern void nativeGetAudioFormat(int id, ref int channel, ref int frequency, ref float totalTime);
+
+		[DllImport (NATIVE_LIBRARY_NAME)]
+		private static extern void nativeSetVideoTime (int id, float currentTime);
+
+		[DllImport (NATIVE_LIBRARY_NAME)]
+		private static extern float nativeGetVideoCurrentTime(int id);
+
+		[DllImport (NATIVE_LIBRARY_NAME)]
+		private static extern bool nativeIsContentReady(int id);
+
+		[DllImport (NATIVE_LIBRARY_NAME)]
+		private static extern int nativeGetMetaData(string filePath, out IntPtr key, out IntPtr value);
+
+		[DllImport(NATIVE_LIBRARY_NAME)]
+		private static extern IntPtr GetRenderEventFunc();
+
+        private const string VERSION = "1.0.1.160908";
+		public bool playOnAwake = false;
+		public string mediaPath = null;	            //	Assigned outside.
+		public UnityEvent onInitComplete = null;    //  Initialization is asynchronized. It would be invoked after initialization.
+		public UnityEvent onVideoEnd = null;        //  It would be invoked on video end.
+
+		public enum DecoderState {
+			INIT_FAIL = -2,
+			STOP,
+			NOT_INITIALIZED,
+			INITIALIZING,
+			INITIALIZED,
+			START,
+			PAUSE,
+			SEEK_FRAME,
+            BUFFERING
+		};
+		private DecoderState lastState = DecoderState.NOT_INITIALIZED;
+		private DecoderState decoderState = DecoderState.NOT_INITIALIZED;
+		private int decoderID = -1;
+
+		private const string LOG_TAG = "[MediaDecoder]";
+
+		public bool isVideoEnabled { get; private set; }
+		public bool isAudioEnabled { get; private set; }
+
+		private bool useDefault = true;             //  This flag is used to set default texture bfore video initialized.
+		private bool seekPreview = false;           //  This flag is to preview first frame of seeking when seek under paused state.
+		private Texture2D videoTexYch = null;
+		private Texture2D videoTexUch = null;
+		private Texture2D videoTexVch = null;
+		private int videoWidth	= -1;
+		private int videoHeight	= -1;
+		
+		private const int AUDIO_FRAME_SIZE = 2048;  //  Audio clip data size. It would be packed from audioDataBuff.
+        private const int SWAP_BUFFER_NUM = 4;		//	How many audio source to swap.
+		private AudioSource[] audioSource = new AudioSource[SWAP_BUFFER_NUM];
+		private List<float> audioDataBuff = null;   //  Buffer to keep audio data decoded from native.
+		private int audioFrequency = 0;
+		private int audioChannel = 0;
+		private const double OVERLAP_TIME = 0.01;   //  Our audio clip is defined as: [overlay][audio data][overlap].
+        private int audioOverlapLength = 0;         //  OVERLAP_TIME * audioFrequency.
+        private int audioDataLength = 0;            //  (AUDIO_FRAME_SIZE + 2 * audioOverlapLength) * audioChannel.
+        private float volume = 1.0f;
+
+        //	Time control
+        private double globalStartTime  = 0;        //  Video and audio progress are based on this start time.
+		private bool isVideoReadyToReplay = false;
+		private bool isAudioReadyToReplay = false;
+		private double audioProgressTime = -1.0;
+		private double hangTime = -1.0f;             //  Used to set progress time after seek/resume.
+        public float videoTotalTime { get; private set; }   //  Video duration.
+        public float audioTotalTime { get; private set; }   //  Audio duration.
+
+        void Awake () {
+			print(LOG_TAG + " ver." + VERSION);
+			if (playOnAwake) {
+				print (LOG_TAG + " play on wake.");
+				onInitComplete.AddListener(startDecoding);
+				initDecoder(mediaPath);
+			}
+		}
+
+        //  Video progress is triggered using Update. Progress time would be set by nativeSetVideoTime.
+        void Update() {
+            if (decoderState == DecoderState.START && nativeIsBufferEmpty(decoderID)) {
+                decoderState = DecoderState.BUFFERING;
+                hangTime = AudioSettings.dspTime - globalStartTime;
+            }
+
+            switch (decoderState) {
+				case DecoderState.START:
+					if (isVideoEnabled) {
+						//  To prevent empty texture generate green screen.(default 0,0,0 in YUV which is green in RGB)
+						if (useDefault && nativeIsContentReady(decoderID)) {
+							getTextureFromNative();
+							setTextures(videoTexYch, videoTexUch, videoTexVch);
+							useDefault = false;
+						}
+
+						//	Update video frame by dspTime.
+						double setTime = AudioSettings.dspTime - globalStartTime;
+
+						//	Normal update frame.
+						if (setTime < videoTotalTime) {
+							if (seekPreview && nativeIsContentReady(decoderID)) {
+								setPause();
+								seekPreview = false;
+								unmute();
+							} else {
+								nativeSetVideoTime(decoderID, (float) setTime);
+								GL.IssuePluginEvent(GetRenderEventFunc(), decoderID);
+							}
+						} else {
+							isVideoReadyToReplay = true;
+						}
+					}
+					break;
+
+				case DecoderState.SEEK_FRAME:
+					if (nativeIsSeekOver(decoderID)) {
+						globalStartTime = AudioSettings.dspTime - hangTime;
+						decoderState = DecoderState.START;
+						if (lastState == DecoderState.PAUSE) {
+							seekPreview = true;
+							mute();
+						}
+					}
+					break;
+
+                case DecoderState.BUFFERING:
+                    if (nativeIsBufferFull(decoderID)) {
+                        decoderState = DecoderState.START;
+                        globalStartTime = AudioSettings.dspTime - hangTime;
+                    }
+                    break;
+
+                case DecoderState.PAUSE:
+                default:
+					break;
+			}
+
+			if (isVideoEnabled || isAudioEnabled) {
+				if ((!isVideoEnabled || isVideoReadyToReplay) && (!isAudioEnabled || isAudioReadyToReplay)) {
+					if (onVideoEnd != null) {
+						onVideoEnd.Invoke();
+					}
+				}
+			}
+		}
+
+		public void initDecoder(string path) {
+			StartCoroutine(initDecoderAsync(path));
+		}
+		IEnumerator initDecoderAsync(string path) {
+			print(LOG_TAG + " init Decoder.");
+			decoderState = DecoderState.INITIALIZING;
+
+			mediaPath = path;
+			decoderID = -1;
+			nativeCreateDecoderAsync(mediaPath, ref decoderID);
+
+			int result = 0;
+			do {
+				yield return null;
+				result = nativeGetDecoderState(decoderID);
+			} while (!(result == 1 || result == -1));
+
+			//  Init success.
+			if (result == 1) {
+				print(LOG_TAG + " Init success.");
+				isVideoEnabled = nativeIsVideoEnabled(decoderID);
+				if (isVideoEnabled) {
+					float duration = 0.0f;
+					nativeGetVideoFormat(decoderID, ref videoWidth, ref videoHeight, ref duration);
+					videoTotalTime = duration;
+					print(LOG_TAG + " Video format: (" + videoWidth + ", " + videoHeight + ")");
+					print(LOG_TAG + " Total time: " + videoTotalTime);
+
+					setTextures(null, null, null);
+					useDefault = true;
+				}
+
+				//	Initialize audio.
+				isAudioEnabled = nativeIsAudioEnabled(decoderID);
+				print(LOG_TAG + " isAudioEnabled = " + isAudioEnabled);
+				if (isAudioEnabled) {
+					float duration = 0.0f;
+					nativeGetAudioFormat(decoderID, ref audioChannel, ref audioFrequency, ref duration);
+					audioTotalTime = duration;
+                    audioOverlapLength = (int) (OVERLAP_TIME * audioFrequency + 0.5f);
+					print(LOG_TAG + " audioChannel " + audioChannel);
+					print(LOG_TAG + " audioFrequency " + audioFrequency);
+					print(LOG_TAG + " audioTotalTime " + audioTotalTime);
+
+                    audioDataLength = (AUDIO_FRAME_SIZE + 2 * audioOverlapLength) * audioChannel;
+					for (int i = 0; i < SWAP_BUFFER_NUM; i++) {
+						audioSource[i] = gameObject.AddComponent<AudioSource>();
+						audioSource[i].clip = AudioClip.Create("testSound" + i, audioDataLength, audioChannel, audioFrequency, false);
+						audioSource[i].playOnAwake = false;
+						audioSource[i].volume = volume;
+						audioSource[i].minDistance = audioSource[i].maxDistance;
+					}
+				}
+
+				decoderState = DecoderState.INITIALIZED;
+
+				if (onInitComplete != null) {
+					onInitComplete.Invoke();
+				}
+			} else {
+				print(LOG_TAG + " Init fail.");
+				decoderState = DecoderState.INIT_FAIL;
+			}
+		}
+		
+		public void startDecoding() {
+			if(decoderState == DecoderState.INITIALIZED) {
+                if (!nativeStartDecoding(decoderID)) {
+					print (LOG_TAG + " Decoding not start.");
+					return;
+				}
+
+                decoderState = DecoderState.START;
+
+                globalStartTime = AudioSettings.dspTime;
+				isVideoReadyToReplay = isAudioReadyToReplay = false;
+				if(isAudioEnabled) {
+					StartCoroutine ("audioPlay");
+				}
+			}
+		}
+
+		private void getTextureFromNative() {
+			ReleaseTexture();
+
+			IntPtr nativeTexturePtrY = new IntPtr();
+			IntPtr nativeTexturePtrU = new IntPtr();
+			IntPtr nativeTexturePtrV = new IntPtr();
+			nativeCreateTexture(decoderID, ref nativeTexturePtrY, ref nativeTexturePtrU, ref nativeTexturePtrV);
+			videoTexYch = Texture2D.CreateExternalTexture(
+				videoWidth, videoHeight, TextureFormat.Alpha8, false, false, nativeTexturePtrY);
+			videoTexUch = Texture2D.CreateExternalTexture(
+				videoWidth / 2, videoHeight / 2, TextureFormat.Alpha8, false, false, nativeTexturePtrU);
+			videoTexVch = Texture2D.CreateExternalTexture(
+				videoWidth / 2, videoHeight / 2, TextureFormat.Alpha8, false, false, nativeTexturePtrV);
+		}
+
+		private void ReleaseTexture() {
+			setTextures(null, null, null);
+			
+			videoTexYch = null;
+			videoTexUch = null;
+			videoTexVch = null;
+
+			useDefault = true;
+		}
+
+		private void setTextures(Texture ytex, Texture utex, Texture vtex) {
+			Material texMaterial = GetComponent<MeshRenderer>().material;
+			texMaterial.SetTexture("_YTex", ytex);
+			texMaterial.SetTexture("_UTex", utex);
+			texMaterial.SetTexture("_VTex", vtex);
+		}
+
+		public void replay() {
+			if (decoderState == DecoderState.START || decoderState == DecoderState.PAUSE) {
+				globalStartTime = AudioSettings.dspTime;
+				isVideoReadyToReplay = isAudioReadyToReplay = false;
+				setSeekTime(0.0f);
+			}
+		}
+
+		IEnumerator audioPlay() {
+			print (LOG_TAG + " start audio play coroutine.");
+			int swapIndex = 0;                  //	Swap between audio sources.
+			IntPtr dataPtr = new IntPtr ();     //	Pointer to get audio data from native.
+			float[] tempBuff = new float[0];    //	Buffer to get audio data from dataPtr.
+			double audioDataTime = (double) AUDIO_FRAME_SIZE / audioFrequency;
+			double lastTime = -1.0f;            //	Avoid to schedule the same audio data set.
+            int playedAudioDataLength = AUDIO_FRAME_SIZE * audioChannel; //  Data length exclude the overlap length.
+            audioDataBuff = new List<float>();
+
+            print(LOG_TAG + " audioDataTime " + audioDataTime);
+
+            audioProgressTime = -1.0;           //  Used to schedule each audio clip to be played.
+			while(decoderState >= DecoderState.START) {
+				if(decoderState != DecoderState.PAUSE && decoderState != DecoderState.BUFFERING) {
+					double currentTime = AudioSettings.dspTime - globalStartTime;
+					if(currentTime < audioTotalTime) {
+						int audioFrameLength = 0;
+						double audioNativeTime = nativeGetAudioData (decoderID, ref dataPtr, ref audioFrameLength);
+                        if (0 < audioNativeTime && lastTime != audioNativeTime && decoderState != DecoderState.SEEK_FRAME) {
+                            if (audioProgressTime == -1.0) {
+                                //  To simplify, the first overlap data would not be played.
+                                //  Correct the audio progress time by adding OVERLAP_TIME.
+                                audioProgressTime = audioNativeTime + OVERLAP_TIME;
+                            }
+
+                            lastTime = audioNativeTime;
+                            audioFrameLength *= audioChannel;
+                            if (tempBuff.Length != audioFrameLength) {
+                                //  For the case of dynamic audio data length, reallocate the memory if needed.
+                                tempBuff = new float[audioFrameLength];
+                            }
+                            Marshal.Copy(dataPtr, tempBuff, 0, audioFrameLength);
+                            audioDataBuff.AddRange(tempBuff);
+                            nativeFreeAudioData(decoderID);
+
+                            if (audioDataBuff.Count >= audioDataLength) {
+                                while (audioSource[swapIndex].isPlaying || decoderState == DecoderState.SEEK_FRAME) { yield return null; }
+
+                                //  Re-check data length if audioDataBuff is cleared by seek.
+                                if (audioDataBuff.Count >= audioDataLength) {
+                                    double playTime = audioProgressTime + globalStartTime;
+                                    double endTime = playTime + audioDataTime;
+
+                                    //  If audio is late, adjust start time and re-calculate audio clip time.
+                                    if (playTime <= AudioSettings.dspTime) {
+                                        globalStartTime = AudioSettings.dspTime - audioProgressTime;
+                                        playTime = audioProgressTime + globalStartTime;
+                                        endTime = playTime + audioDataTime;
+                                    }
+
+                                    audioSource[swapIndex].clip.SetData(audioDataBuff.GetRange(0, audioDataLength).ToArray(), 0);
+                                    audioSource[swapIndex].PlayScheduled(playTime);
+                                    audioSource[swapIndex].SetScheduledEndTime(endTime);
+                                    audioSource[swapIndex].time = (float) OVERLAP_TIME;
+                                    audioProgressTime += audioDataTime;
+                                    swapIndex = (swapIndex + 1) % SWAP_BUFFER_NUM;
+
+                                    audioDataBuff.RemoveRange(0, playedAudioDataLength);
+                                }
+                            }
+
+                        } else {
+                            nativeFreeAudioData(decoderID);
+                        }
+					} else {
+						//print(LOG_TAG + " Audio reach EOF. Prepare replay.");
+						isAudioReadyToReplay = true;
+						audioProgressTime = -1.0;
+						audioDataBuff.Clear();
+					}
+				}
+				yield return null;
+			}
+
+			Marshal.Release(dataPtr);
+			audioDataBuff.Clear();
+			audioDataBuff = null;
+		}
+
+		public void stopDecoding() {
+			if(decoderState >= DecoderState.INITIALIZING) {
+				print (LOG_TAG + " stop decoding.");
+				decoderState = DecoderState.STOP;
+				ReleaseTexture();
+				if (isAudioEnabled) {
+					StopCoroutine ("audioPlay");
+
+					if (audioSource != null) {
+						for (int i = 0; i < SWAP_BUFFER_NUM; i++) {
+							if (audioSource[i] != null) {
+								AudioClip.Destroy(audioSource[i].clip);
+								AudioSource.Destroy(audioSource[i]);
+								audioSource[i] = null;
+							}
+						}
+					}
+				}
+
+				nativeDestroyDecoder (decoderID);
+				decoderID = -1;
+				decoderState = DecoderState.NOT_INITIALIZED;
+
+				isVideoEnabled = isAudioEnabled = false;
+				isVideoReadyToReplay = isAudioReadyToReplay = false;
+			}
+		}
+
+		public void setSeekTime(float seekTime) {
+			if(decoderState != DecoderState.SEEK_FRAME && decoderState >= DecoderState.START) {
+				float setTime = 0.0f;
+				if(	(isVideoEnabled && seekTime > videoTotalTime)	|| 
+					(isAudioEnabled && seekTime > audioTotalTime)	||
+					isVideoReadyToReplay || isAudioReadyToReplay	||
+					seekTime < 0.0f) {
+					print (LOG_TAG + " Seek over end. ");
+					setTime = 0.0f;
+				} else {
+					setTime = seekTime;
+				}
+
+				lastState = decoderState;
+				decoderState = DecoderState.SEEK_FRAME;
+				print (LOG_TAG + " set seek time: " + setTime);
+				hangTime = setTime;
+				nativeSetSeekTime(decoderID, setTime);
+				nativeSetVideoTime(decoderID, (float) setTime);
+
+				if (isAudioEnabled) {
+					audioDataBuff.Clear();
+					audioProgressTime = -1.0;
+					foreach (AudioSource src in audioSource) {
+						src.Stop();
+					}
+				}
+			}
+		}
+		
+		public bool isSeeking() {
+			return decoderState >= DecoderState.INITIALIZED && (decoderState == DecoderState.SEEK_FRAME || !nativeIsContentReady(decoderID));
+		}
+
+		public void setStepForward(float sec) {
+			print(LOG_TAG + " set forward : " + sec);
+			double targetTime = AudioSettings.dspTime - globalStartTime + sec;
+			setSeekTime((float) targetTime);
+		}
+
+		public void setStepBackward(float sec) {
+			print(LOG_TAG + " set backward : " + sec);
+			double targetTime = AudioSettings.dspTime - globalStartTime - sec;
+			setSeekTime((float) targetTime);
+		}
+
+		public void getVideoResolution(ref int width, ref int height) {
+			width = videoWidth;
+			height = videoHeight;
+		}
+
+		public float getVideoCurrentTime() {
+			if (decoderState == DecoderState.PAUSE || decoderState == DecoderState.SEEK_FRAME) {
+				return (float) hangTime;
+			} else {
+				return (float) (AudioSettings.dspTime - globalStartTime);
+			}
+		}
+
+		public DecoderState getDecoderState() {
+			return decoderState;
+		}
+
+		public void setPause() {
+			if (decoderState == DecoderState.START) {
+				hangTime = AudioSettings.dspTime - globalStartTime;
+				decoderState = DecoderState.PAUSE;
+				if (isAudioEnabled) {
+					foreach (AudioSource src in audioSource) {
+						src.Pause();
+					}
+				}
+			}
+		}
+
+		public void setResume() {
+			if (decoderState == DecoderState.PAUSE) {
+				globalStartTime = AudioSettings.dspTime - hangTime;
+				decoderState = DecoderState.START;
+				if (isAudioEnabled) {
+					foreach (AudioSource src in audioSource) {
+						src.UnPause();
+					}
+				}
+			}
+		}
+
+		public void setVolume(float vol) {
+			volume = Mathf.Clamp(vol, 0.0f, 1.0f);
+			foreach (AudioSource src in audioSource) {
+				if(src != null) {
+					src.volume = volume;
+				}
+			}
+		}
+
+		public float getVolume() {
+			return volume;
+		}
+
+		public void mute() {
+			float temp = volume;
+			setVolume(0.0f);
+			volume = temp;
+		}
+
+		public void unmute() {
+			setVolume(volume);
+		}
+
+		public static void getMetaData(string filePath, out string[] key, out string[] value) {
+			IntPtr keyptr = IntPtr.Zero;
+			IntPtr valptr = IntPtr.Zero;
+
+			int metaCount = nativeGetMetaData(filePath, out keyptr, out valptr);
+
+			IntPtr[] keys = new IntPtr[metaCount];
+			IntPtr[] vals = new IntPtr[metaCount];
+			Marshal.Copy(keyptr, keys, 0, metaCount);
+			Marshal.Copy(valptr, vals, 0, metaCount);
+
+			string[] keyArray = new string[metaCount];
+			string[] valArray = new string[metaCount];
+			for (int i = 0; i < metaCount; i++) {
+				keyArray[i] = Marshal.PtrToStringAnsi(keys[i]);
+				valArray[i] = Marshal.PtrToStringAnsi(vals[i]);
+				Marshal.FreeCoTaskMem(keys[i]);
+				Marshal.FreeCoTaskMem(vals[i]);
+			}
+			Marshal.FreeCoTaskMem(keyptr);
+			Marshal.FreeCoTaskMem(valptr);
+
+			key = keyArray;
+			value = valArray;
+		}
+
+		void OnApplicationQuit() {
+			print (LOG_TAG + " OnApplicationQuit");
+			stopDecoding ();
+		}
+
+		void OnDestroy() {
+			print (LOG_TAG + " OnDestroy");
+			stopDecoding ();
+		}
+	}
+}

@@ -1,0 +1,455 @@
+﻿//========= Copyright 2015-2016, HTC Corporation. All rights reserved. ===========
+
+#include "Unity\IUnityGraphics.h"
+#include "MediaDecoder.h"
+#include "AVHandler.h"
+#include "Logger.h"
+#include "DX11TextureObject.h"
+#include <stdio.h>
+#include <thread>
+#include <list>
+
+typedef struct _VideoContext {
+	int id = -1;
+	char* path = NULL;
+	std::thread initThread;
+	AVHandler* avhandler = NULL;
+	ITextureObject* textureObj = NULL;
+	float progressTime = 0.0f;
+	float lastUpdateTime = -1.0f;
+	bool isContentReady = false;	//	This flag is used to indicate the period that seek over until first data is got.
+									//	Usually used for AV sync problem, in pure audio case, it should be discard.
+} VideoContext;
+
+ID3D11Device* g_D3D11Device = NULL;
+std::list<VideoContext> videoContexts;
+typedef std::list<VideoContext>::iterator VideoContextIter;
+// --------------------------------------------------------------------------
+static IUnityInterfaces* s_UnityInterfaces = NULL;
+static IUnityGraphics* s_Graphics = NULL;
+static UnityGfxRenderer s_DeviceType = kUnityGfxRendererNull;
+static void DoEventGraphicsDeviceD3D11(UnityGfxDeviceEventType eventType)
+{
+	if (eventType == kUnityGfxDeviceEventInitialize)
+	{
+		IUnityGraphicsD3D11* d3d11 = s_UnityInterfaces->Get<IUnityGraphicsD3D11>();
+		g_D3D11Device = d3d11->GetDevice();
+	}
+}
+
+static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType eventType)
+{
+	UnityGfxRenderer currentDeviceType = s_DeviceType;
+
+	switch (eventType)
+	{
+	case kUnityGfxDeviceEventInitialize:
+	{
+		s_DeviceType = s_Graphics->GetRenderer();
+		currentDeviceType = s_DeviceType;
+		break;
+	}
+
+	case kUnityGfxDeviceEventShutdown:
+		s_DeviceType = kUnityGfxRendererNull;
+		break;
+
+	case kUnityGfxDeviceEventBeforeReset:
+		break;
+
+	case kUnityGfxDeviceEventAfterReset:
+		break;
+	};
+
+#if SUPPORT_D3D11
+	if (currentDeviceType == kUnityGfxRendererD3D11)
+		DoEventGraphicsDeviceD3D11(eventType);
+#endif
+}
+
+extern "C" void	UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginLoad(IUnityInterfaces* unityInterfaces)
+{
+	s_UnityInterfaces = unityInterfaces;
+	s_Graphics = s_UnityInterfaces->Get<IUnityGraphics>();
+	s_Graphics->RegisterDeviceEventCallback(OnGraphicsDeviceEvent);
+
+	// Run OnGraphicsDeviceEvent(initialize) manually on plugin load
+	OnGraphicsDeviceEvent(kUnityGfxDeviceEventInitialize);
+}
+
+extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginUnload()
+{
+	s_Graphics->UnregisterDeviceEventCallback(OnGraphicsDeviceEvent);
+}
+// --------------------------------------------------------------------------
+
+VideoContextIter getVideoContextIter(int id) {
+	for (VideoContextIter it = videoContexts.begin(); it != videoContexts.end(); it++) {
+		if (it->id == id) { return it; }
+	}
+
+	return videoContexts.end();
+}
+
+void DoRendering(int id);
+
+static void UNITY_INTERFACE_API OnRenderEvent(int eventID)
+{
+	// Unknown graphics device type? Do nothing.
+	if (s_DeviceType == -1)
+		return;
+
+	// Actual functions defined below
+	DoRendering(eventID);
+}
+
+extern "C" UnityRenderingEvent UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API GetRenderEventFunc()
+{
+	return OnRenderEvent;
+}
+
+void DoRendering (int id)
+{
+	if (s_DeviceType == kUnityGfxRendererD3D11 && g_D3D11Device != NULL)
+	{
+		ID3D11DeviceContext* ctx = NULL;
+		g_D3D11Device->GetImmediateContext (&ctx);
+
+		VideoContextIter iter = getVideoContextIter(id);
+		if (iter != videoContexts.end()) {
+			VideoContext* localVideoContext = &(*iter);
+			AVHandler* localAVHandler = localVideoContext->avhandler;
+
+			if (localAVHandler != NULL && localAVHandler->getDecoderState() >= AVHandler::DecoderState::INITIALIZED && localAVHandler->getVideoInfo().isEnabled) {
+				if (localVideoContext->textureObj == NULL) {
+					unsigned int width = localAVHandler->getVideoInfo().width;
+					unsigned int height = localAVHandler->getVideoInfo().height;
+					localVideoContext->textureObj = new DX11TextureObject();
+					localVideoContext->textureObj->create(g_D3D11Device, width, height);
+				}
+
+				double videoDecCurTime = localAVHandler->getVideoInfo().lastTime;
+				if (videoDecCurTime <= localVideoContext->progressTime) {
+					uint8_t* ptrY = NULL;
+					uint8_t* ptrU = NULL;
+					uint8_t* ptrV = NULL;
+					double curFrameTime = localAVHandler->getVideoFrame(&ptrY, &ptrU, &ptrV);
+					if (ptrY != NULL && curFrameTime != -1 && localVideoContext->lastUpdateTime != curFrameTime) {
+						localVideoContext->textureObj->upload(ptrY, ptrU, ptrV);
+						localVideoContext->lastUpdateTime = (float)curFrameTime;
+						localVideoContext->isContentReady = true;
+					}
+					localAVHandler->freeVideoFrame();
+				}
+			}
+		}
+		ctx->Release();
+	}
+}
+
+int nativeCreateDecoderAsync(const char* filePath, int& id) {
+	int newID = 0;
+	while (getVideoContextIter(newID) != videoContexts.end()) { newID++; }
+
+	VideoContext context;
+	context.avhandler = new AVHandler();
+	context.id = newID;
+	id = context.id;
+	context.path = (char*)malloc(sizeof(char) * (strlen(filePath) + 1));
+	strcpy_s(context.path, strlen(filePath) + 1, filePath);
+	context.isContentReady = false;
+	videoContexts.push_back(std::move(context));
+
+	VideoContextIter iter = getVideoContextIter(id);
+	iter->initThread = std::thread([iter]() {
+		iter->avhandler->init(iter->path);
+	});
+
+	return 0;
+}
+
+int nativeCreateDecoder(const char* filePath, int& id) {
+	int newID = 0;
+	while (getVideoContextIter(newID) != videoContexts.end()) { newID++; }
+
+	VideoContext context;
+	context.avhandler = new AVHandler();
+	context.id = newID;
+	id = context.id;
+	context.path = NULL;
+	context.isContentReady = false;
+	context.avhandler->init(filePath);
+
+	videoContexts.push_back(std::move(context));
+
+	return 0;
+}
+
+int nativeGetDecoderState(int id) {
+	VideoContextIter iter = getVideoContextIter(id);
+	if (iter != videoContexts.end() && iter->avhandler != NULL) {
+		return iter->avhandler->getDecoderState();
+	} else {
+		return -1;
+	}
+}
+
+void nativeCreateTexture(int id, void*& tex0, void*& tex1, void*& tex2) {
+	VideoContextIter iter = getVideoContextIter(id);
+	if (iter != videoContexts.end() && iter->textureObj != NULL) {
+		iter->textureObj->getResourcePointers(tex0, tex1, tex2);
+	}
+}
+
+bool nativeStartDecoding(int id) {
+	VideoContextIter iter = getVideoContextIter(id);
+	if (iter != videoContexts.end() && iter->avhandler != NULL) {
+		if (iter->initThread.joinable()) {
+			iter->initThread.join();
+		}
+
+		AVHandler* avhandler = iter->avhandler;
+		if (avhandler->getDecoderState() >= AVHandler::DecoderState::INITIALIZED) {
+			avhandler->startDecoding();
+		}
+
+		if (!avhandler->getVideoInfo().isEnabled) {
+			iter->isContentReady = true;
+		}
+
+		return true;
+	} else {
+		LOG("avHandler is NULL. \n");
+		return false;
+	}
+}
+
+void nativeDestroyDecoder(int id) {
+	VideoContextIter iter = getVideoContextIter(id);
+	if (iter != videoContexts.end()) {
+		LOG("nativeDestroyDecoder %d. \n", id);
+		iter->id = -1;
+		if (iter->initThread.joinable()) {
+			iter->initThread.join();
+		}
+
+		if (iter->avhandler != NULL) {
+			delete (iter->avhandler);
+			iter->avhandler = NULL;
+		}
+
+		if (iter->path != NULL) {
+			free(iter->path);
+			iter->path = NULL;
+		}
+
+		iter->progressTime = 0.0f;
+		iter->lastUpdateTime = 0.0f;
+
+		if (iter->textureObj != NULL) {
+			delete (iter->textureObj);
+			iter->textureObj = NULL;
+		}
+
+		iter->isContentReady = false;
+
+		videoContexts.erase(iter);
+	}
+}
+
+//	Video
+bool nativeIsVideoEnabled(int id) {
+	VideoContextIter iter = getVideoContextIter(id);
+	if (iter != videoContexts.end() && iter->avhandler->getDecoderState() >= AVHandler::DecoderState::INITIALIZED) {
+		bool ret = iter->avhandler->getVideoInfo().isEnabled;
+		LOG("nativeIsVideoEnabled: %s \n", ret ? "true" : "false");
+		return ret;
+	}
+	LOG("decoder is unavailable. \n");
+
+	return false;
+}
+
+void nativeGetVideoFormat(int id, int& width, int& height, float& totalTime) {
+	VideoContextIter iter = getVideoContextIter(id);
+	if (iter != videoContexts.end() && iter->avhandler->getDecoderState() >= AVHandler::DecoderState::INITIALIZED) {
+		IDecoder::VideoInfo* videoInfo = &(iter->avhandler->getVideoInfo());
+		width = videoInfo->width;
+		height = videoInfo->height;
+		totalTime = (float) (videoInfo->totalTime);
+	} else {
+		LOG("decoder is unavailable. \n");
+	}
+}
+
+void nativeSetVideoTime(int id, float currentTime) {
+	VideoContextIter iter = getVideoContextIter(id);
+	if (iter != videoContexts.end()) {
+		iter->progressTime = currentTime;
+	}
+}
+
+bool nativeIsAudioEnabled(int id) {
+	VideoContextIter iter = getVideoContextIter(id);
+	if (iter != videoContexts.end() && iter->avhandler->getDecoderState() >= AVHandler::DecoderState::INITIALIZED) {
+		bool ret = iter->avhandler->getAudioInfo().isEnabled;
+		LOG("nativeIsAudioEnabled: %s \n", ret ? "true" : "false");
+		return ret;
+	}
+	LOG("avHandler is NULL. \n");
+
+	return false;
+}
+
+void nativeGetAudioFormat(int id, int& channel, int& frequency, float& totalTime) {
+	VideoContextIter iter = getVideoContextIter(id);
+	if (iter != videoContexts.end() && iter->avhandler->getDecoderState() >= AVHandler::DecoderState::INITIALIZED) {
+		IDecoder::AudioInfo* audioInfo = &(iter->avhandler->getAudioInfo());
+		channel = audioInfo->channels;
+		frequency = audioInfo->sampleRate;
+		totalTime = (float) (audioInfo->totalTime);
+	}
+}
+
+float nativeGetAudioData(int id, unsigned char** audioData, int& frameSize) {
+	VideoContextIter iter = getVideoContextIter(id);
+	if (iter != videoContexts.end()) {
+		return (float) (iter->avhandler->getAudioFrame(audioData, frameSize));
+	} else {
+		return -1.0f;
+	}
+}
+
+void nativeFreeAudioData(int id) {
+	VideoContextIter iter = getVideoContextIter(id);
+	if (iter != videoContexts.end()) {
+		iter->avhandler->freeAudioFrame();
+	}
+}
+
+void nativeSetSeekTime(int id, float sec) {
+	VideoContextIter iter = getVideoContextIter(id);
+	if (iter != videoContexts.end() && iter->avhandler->getDecoderState() >= AVHandler::DecoderState::INITIALIZED) {
+		LOG("nativeSetSeekTime %f. \n", sec);
+		iter->avhandler->setSeekTime(sec);
+		if (!iter->avhandler->getVideoInfo().isEnabled) {
+			iter->isContentReady = true;
+		} else {
+			iter->isContentReady = false;
+		}
+	}
+}
+
+bool nativeIsSeekOver(int id) {
+	VideoContextIter iter = getVideoContextIter(id);
+	if (iter != videoContexts.end()) {
+		return !(iter->avhandler->getDecoderState() == AVHandler::DecoderState::SEEK);
+	}
+	return false;
+}
+
+bool nativeIsBufferFull(int id) {
+	VideoContextIter iter = getVideoContextIter(id);
+	if (iter != videoContexts.end()) {
+		return iter->avhandler->isBufferFull();
+	}
+	return false;
+}
+
+bool nativeIsBufferEmpty(int id) {
+	VideoContextIter iter = getVideoContextIter(id);
+	if (iter != videoContexts.end()) {
+		return iter->avhandler->isBufferEmpty();
+	}
+	return false;
+}
+
+/*	This function is for thumbnail extraction.*/
+void nativeUpdateThumbnail(int id, void* texY, void* texU, void* texV, float time) {
+	VideoContextIter iter = getVideoContextIter(id);
+	if (iter != videoContexts.end()) {
+		//	1.Initialize variable and texture
+		AVHandler* avhandler = iter->avhandler;
+		IDecoder::VideoInfo* videoInfo = &(avhandler->getVideoInfo());
+		int width = (int) (ceil((float) videoInfo->width / ITextureObject::CPU_ALIGMENT) * ITextureObject::CPU_ALIGMENT);
+		int height = videoInfo->height;
+		float targetTime = time;
+		ID3D11DeviceContext* ctx = NULL;
+		ID3D11Texture2D* d3dtex0 = (ID3D11Texture2D*)texY;
+		ID3D11Texture2D* d3dtex1 = (ID3D11Texture2D*)texU;
+		ID3D11Texture2D* d3dtex2 = (ID3D11Texture2D*)texV;
+		uint8_t* yptr = NULL;
+		uint8_t* uptr = NULL;
+		uint8_t* vptr = NULL;
+		uint8_t* audio = NULL;
+		int framesize = 0;
+
+		//	2.Get thumbnail data and update texture
+		avhandler->setSeekTime(targetTime);
+		do {
+			avhandler->getVideoFrame(&yptr, &uptr, &vptr);
+			avhandler->getAudioFrame(&audio, framesize);
+		} while (yptr == NULL);
+
+		g_D3D11Device->GetImmediateContext(&ctx);
+		ctx->UpdateSubresource(d3dtex0, 0, NULL, yptr, width, 0);
+		ctx->UpdateSubresource(d3dtex1, 0, NULL, uptr, width / 2, 0);
+		ctx->UpdateSubresource(d3dtex2, 0, NULL, vptr, width / 2, 0);
+		ctx->Release();
+
+		//	3.Release related resources
+		delete (iter->avhandler);
+		iter->avhandler = NULL;
+		iter->progressTime = 0.0f;
+		iter->lastUpdateTime = 0.0f;
+	}
+}
+
+int nativeGetMetaData(const char* filePath, char*** key, char*** value) {
+	AVHandler* avhandler = new AVHandler();
+	avhandler->init(filePath);
+
+	char** metaKey = NULL;
+	char** metaValue = NULL;
+	int metaCount = avhandler->getMetaData(metaKey, metaValue);
+
+	*key = (char**)CoTaskMemAlloc(sizeof(char*) * metaCount);
+	*value = (char**)CoTaskMemAlloc(sizeof(char*) * metaCount);
+
+	for (int i = 0; i < metaCount; i++) {
+		(*key)[i] = (char*)CoTaskMemAlloc(strlen(metaKey[i]) + 1);
+		(*value)[i] = (char*)CoTaskMemAlloc(strlen(metaValue[i]) + 1);
+		strcpy_s((*key)[i], strlen(metaKey[i]) + 1, metaKey[i]);
+		strcpy_s((*value)[i], strlen(metaValue[i]) + 1, metaValue[i]);
+	}
+
+	free(metaKey);
+	free(metaValue);
+
+	delete avhandler;
+
+	return metaCount;
+}
+
+bool nativeIsContentReady(int id) {
+	VideoContextIter iter = getVideoContextIter(id);
+	return (iter != videoContexts.end() && iter->isContentReady);
+}
+
+//extern "C" EXPORT_API void nativeGetTextureType(void* ptr0) {
+//	ID3D11Texture2D* d3dtex = (ID3D11Texture2D*)(ptr0);
+//	D3D11_TEXTURE2D_DESC desc;
+//	d3dtex->GetDesc(&desc);
+//	LOG("Texture format = %d \n", desc.Format);
+//}
+
+//int saveByteBuffer(const unsigned char* buff, int fileLength, const char* filePath){
+//	FILE *fout = fopen(filePath, "wb+");
+//	if (!fout){
+//		printf("Can't open output file\n");
+//		return 1;
+//	}
+//	fwrite(buff, sizeof(char)*fileLength, 1, fout);
+//	fclose(fout);
+//	return NO_ERROR;
+//}
