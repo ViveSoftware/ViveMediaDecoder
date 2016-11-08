@@ -2,6 +2,8 @@
 
 #include "DecoderFFmpeg.h"
 #include "Logger.h"
+#include <fstream>
+#include <string>
 
 /*	Update log:
 *	2015.03.17 Move sws_scale to decode thread, so that render thread would not cost time to do type-transform.
@@ -39,6 +41,11 @@
 *	2016.07.25 Fix memory leak.
 *	2016.08.31 Refactor to dynamic buffering. Add BufferState which record either FULL or EMPTY state for buffering judgement.
 *	2016.09.08 Fix the issue of state error.
+*	2016.10.27 Add API to get all audio channels.
+*	2016.10.28 Fix 32 bits dll loading fail problem. Root cause: lack of module definition(*.def), it may be included only for 64 bits.
+*	2016.11.03 Fix seek occasionally crash. Root cause: multi-thread race condition to operate buffer.
+*	2016.11.04 Fix performance issue that lock_guard too much.
+*	2016.11.16 Add native config file loading.
 */
 
 DecoderFFmpeg::DecoderFFmpeg() {
@@ -53,22 +60,28 @@ DecoderFFmpeg::DecoderFFmpeg() {
 
 	mSwrContext = NULL;
 
+	mBuffMax = 128;
+	mBuffMin = 64;
+
 	memset(&mVideoInfo, 0, sizeof(VideoInfo));
 	memset(&mAudioInfo, 0, sizeof(AudioInfo));
-	isInitialized = false;
+	mIsInitialized = false;
+	mIsAudioAllChEnabled = false;
+	mUseTCP = false;
 }
+
 DecoderFFmpeg::~DecoderFFmpeg() {
 	destroy();
 }
 
 bool DecoderFFmpeg::init(const char* filePath) {
-	if (isInitialized) {
-		LOG("file path is NULL. \n");
+	if (mIsInitialized) {
+		LOG("Decoder has been init. \n");
 		return true;
 	}
 
 	if (filePath == NULL) {
-		LOG("file path is NULL. \n");
+		LOG("File path is NULL. \n");
 		return false;
 	}
 
@@ -79,12 +92,30 @@ bool DecoderFFmpeg::init(const char* filePath) {
 	}
 
 	int errorCode = 0;
-	if ((errorCode = avformat_open_input(&mAVFormatContext, filePath, NULL, NULL)) != 0) {
+	errorCode = loadConfig();
+	if (errorCode < 0) {
+		LOG("config loading error. \n");
+		LOG("Use default settings. \n");
+		mBuffMax = 128;
+		mBuffMin = 64;
+		mUseTCP = false;
+	}
+
+	AVDictionary* opts = NULL;
+	if (mUseTCP) {
+		av_dict_set(&opts, "rtsp_transport", "tcp", 0);
+	}
+	
+	errorCode = avformat_open_input(&mAVFormatContext, filePath, NULL, &opts);
+	av_dict_free(&opts);
+	if (errorCode < 0) {
 		LOG("avformat_open_input error(%x). \n", errorCode);
 		printErrorMsg(errorCode);
 		return false;
 	}
-	if ((errorCode = avformat_find_stream_info(mAVFormatContext, NULL)) < 0) {
+
+	errorCode = avformat_find_stream_info(mAVFormatContext, NULL);
+	if (errorCode < 0) {
 		LOG("avformat_find_stream_info error(%x). \n", errorCode);
 		printErrorMsg(errorCode);
 		return false;
@@ -109,7 +140,8 @@ bool DecoderFFmpeg::init(const char* filePath) {
 			return false;
 		}
 
-		if ((errorCode = avcodec_open2(mVideoCodecContext, mVideoCodec, NULL)) < 0) {
+		errorCode = avcodec_open2(mVideoCodecContext, mVideoCodec, NULL);
+		if (errorCode < 0) {
 			LOG("Could not open video codec(%x). \n", errorCode);
 			printErrorMsg(errorCode);
 			return false;
@@ -129,8 +161,7 @@ bool DecoderFFmpeg::init(const char* filePath) {
 	if (audioStreamIndex < 0) {
 		LOG("audio stream not found. \n");
 		mAudioInfo.isEnabled = false;
-	}
-	else {
+	} else {
 		mAudioInfo.isEnabled = true;
 		mAudioStream = mAVFormatContext->streams[audioStreamIndex];
 		mAudioCodecContext = mAudioStream->codec;
@@ -141,49 +172,30 @@ bool DecoderFFmpeg::init(const char* filePath) {
 			return false;
 		}
 
-		if ((errorCode = avcodec_open2(mAudioCodecContext, mAudioCodec, NULL)) < 0) {
+		errorCode = avcodec_open2(mAudioCodecContext, mAudioCodec, NULL);
+		if (errorCode < 0) {
 			LOG("Could not open audio codec(%x). \n", errorCode);
 			printErrorMsg(errorCode);
 			return false;
 		}
 
-		//	Audio format converter initialize
-		//	Some codec context information maybe incomplete
-		int64_t inChannelLayout = av_get_default_channel_layout(mAudioCodecContext->channels);
-		AVSampleFormat inSampleFormat = mAudioCodecContext->sample_fmt;
-		int inSampleRate = mAudioCodecContext->sample_rate;
-		//	Output formate settings, Maybe these setting can be more generalized.
-		AVSampleFormat outSampleFormat = AV_SAMPLE_FMT_FLT;
-		uint64_t outChannelLayout = AV_CH_LAYOUT_STEREO;
-		int outSampleRate = inSampleRate;
-
-		mSwrContext = swr_alloc_set_opts(NULL,
-			outChannelLayout, outSampleFormat, outSampleRate,
-			inChannelLayout, inSampleFormat, inSampleRate,
-			0, NULL);
-		if (swr_is_initialized(mSwrContext) == 0) {
-			if ((errorCode = swr_init(mSwrContext)) < 0) {
-				LOG("Init SwrContext error.(%x) \n", errorCode);
-				printErrorMsg(errorCode);
-				return false;
-			}
+		errorCode = initSwrContext();
+		if (errorCode < 0) {
+			LOG("Init SwrContext error.(%x) \n", errorCode);
+			printErrorMsg(errorCode);
+			return false;
 		}
-
-		//	Save the output audio format
-		mAudioInfo.channels = av_get_channel_layout_nb_channels(outChannelLayout);
-		mAudioInfo.sampleRate = outSampleRate;
-		mAudioInfo.totalTime = mAudioStream->duration <= 0 ? ctxDuration : mAudioStream->duration * av_q2d(mAudioStream->time_base);
 
 		mAudioFrames.clear();
 	}
 
-	isInitialized = true;
+	mIsInitialized = true;
 
 	return true;
 }
 
 bool DecoderFFmpeg::decode() {
-	if (!isInitialized) {
+	if (!mIsInitialized) {
 		LOG("Not initialized. \n");
 		return false;
 	}
@@ -196,8 +208,7 @@ bool DecoderFFmpeg::decode() {
 
 		if (mVideoInfo.isEnabled && mPacket.stream_index == mVideoStream->index) {
 			updateVideoFrame();
-		}
-		else if (mAudioInfo.isEnabled && mPacket.stream_index == mAudioStream->index) {
+		} else if (mAudioInfo.isEnabled && mPacket.stream_index == mAudioStream->index) {
 			updateAudioFrame();
 		}
 
@@ -216,9 +227,72 @@ IDecoder::AudioInfo DecoderFFmpeg::getAudioInfo() {
 	return mAudioInfo;
 }
 
+void DecoderFFmpeg::setVideoEnable(bool isEnable) {
+	if (mVideoStream == NULL) {
+		LOG("Video stream not found. \n");
+		return;
+	}
+
+	mVideoInfo.isEnabled = isEnable;
+}
+
+void DecoderFFmpeg::setAudioEnable(bool isEnable) {
+	if (mAudioStream == NULL) {
+		LOG("Audio stream not found. \n");
+		return;
+	}
+
+	mAudioInfo.isEnabled = isEnable;
+}
+
+void DecoderFFmpeg::setAudioAllChDataEnable(bool isEnable) {
+	mIsAudioAllChEnabled = isEnable;
+	initSwrContext();
+}
+
+int DecoderFFmpeg::initSwrContext() {
+	if (mAudioCodecContext == NULL) {
+		LOG("Audio context is null. \n");
+		return -1;
+	}
+
+	int errorCode = 0;
+	int64_t inChannelLayout = av_get_default_channel_layout(mAudioCodecContext->channels);
+	uint64_t outChannelLayout = mIsAudioAllChEnabled ? inChannelLayout : AV_CH_LAYOUT_STEREO;
+	AVSampleFormat inSampleFormat = mAudioCodecContext->sample_fmt;
+	AVSampleFormat outSampleFormat = AV_SAMPLE_FMT_FLT;
+	int inSampleRate = mAudioCodecContext->sample_rate;
+	int outSampleRate = inSampleRate;
+
+	if (mSwrContext != NULL) {
+		swr_close(mSwrContext);
+		swr_free(&mSwrContext);
+		mSwrContext = NULL;
+	}
+
+	mSwrContext = swr_alloc_set_opts(NULL,
+		outChannelLayout, outSampleFormat, outSampleRate,
+		inChannelLayout, inSampleFormat, inSampleRate,
+		0, NULL);
+
+	
+	if (swr_is_initialized(mSwrContext) == 0) {
+		errorCode = swr_init(mSwrContext);
+	}
+
+	//	Save the output audio format
+	mAudioInfo.channels = av_get_channel_layout_nb_channels(outChannelLayout);
+	mAudioInfo.sampleRate = outSampleRate;
+	mAudioInfo.totalTime = mAudioStream->duration <= 0 ? (double)(mAVFormatContext->duration) / AV_TIME_BASE : mAudioStream->duration * av_q2d(mAudioStream->time_base);
+	
+	return errorCode;
+}
+
 double DecoderFFmpeg::getVideoFrame(unsigned char** outputY, unsigned char** outputU, unsigned char** outputV) {
-	if (!isInitialized || mVideoFrames.size() == 0) {
-		LOG("Not initialized. \n");
+	std::lock_guard<std::mutex> lock(mMutex);
+	
+	if (!mIsInitialized || mVideoFrames.size() == 0) {
+		LOG("Video frame not available. \n");
 		*outputY = *outputU = *outputV = NULL;
 		return -1;
 	}
@@ -236,8 +310,9 @@ double DecoderFFmpeg::getVideoFrame(unsigned char** outputY, unsigned char** out
 }
 
 double DecoderFFmpeg::getAudioFrame(unsigned char** outputFrame, int& frameSize) {
-	if (!isInitialized || mAudioFrames.size() == 0) {
-		LOG("Not initialized. \n");
+	std::lock_guard<std::mutex> lock(mMutex);
+	if (!mIsInitialized || mAudioFrames.size() == 0) {
+		LOG("Audio frame not available. \n");
 		*outputFrame = NULL;
 		return -1;
 	}
@@ -253,15 +328,16 @@ double DecoderFFmpeg::getAudioFrame(unsigned char** outputFrame, int& frameSize)
 }
 
 void DecoderFFmpeg::seek(double time) {
-	if (!isInitialized) {
+	if (!mIsInitialized) {
 		LOG("Not initialized. \n");
 		return;
 	}
 
 	uint64_t timeStamp = (uint64_t) time * AV_TIME_BASE;
 
-	if (0 > av_seek_frame(mAVFormatContext, -1, timeStamp, time == 0.0 ? AVSEEK_FLAG_BACKWARD : AVSEEK_FLAG_ANY )) {
+	if (0 > av_seek_frame(mAVFormatContext, -1, timeStamp, AVSEEK_FLAG_BACKWARD)) {
 		LOG("Seek time fail.\n");
+		return;
 	}
 
 	if (mVideoInfo.isEnabled) {
@@ -282,7 +358,7 @@ void DecoderFFmpeg::seek(double time) {
 }
 
 int DecoderFFmpeg::getMetaData(char**& key, char**& value) {
-	if (!isInitialized || key != NULL || value != NULL) {
+	if (!mIsInitialized || key != NULL || value != NULL) {
 		return 0;
 	}
 
@@ -306,53 +382,55 @@ void DecoderFFmpeg::destroy() {
 		avcodec_close(mVideoCodecContext);
 		mVideoCodecContext = NULL;
 	}
-
+	
 	if (mAudioCodecContext != NULL) {
 		avcodec_close(mAudioCodecContext);
 		mAudioCodecContext = NULL;
 	}
-
+	
 	if (mAVFormatContext != NULL) {
 		avformat_close_input(&mAVFormatContext);
 		avformat_free_context(mAVFormatContext);
 		mAVFormatContext = NULL;
 	}
-
+	
 	if (mSwrContext != NULL) {
 		swr_close(mSwrContext);
 		swr_free(&mSwrContext);
 		mSwrContext = NULL;
 	}
-
+	
 	flushBuffer(&mVideoFrames);
 	flushBuffer(&mAudioFrames);
-
+	
 	mVideoCodec = NULL;
 	mAudioCodec = NULL;
-
+	
 	mVideoStream = NULL;
 	mAudioStream = NULL;
 	av_packet_unref(&mPacket);
-
+	
 	memset(&mVideoInfo, 0, sizeof(VideoInfo));
 	memset(&mAudioInfo, 0, sizeof(AudioInfo));
+	
+	mIsInitialized = false;
+	mIsAudioAllChEnabled = false;
+	mBuffMax = 128;
+	mBuffMin = 64;
+	mUseTCP = false;
 }
 
 bool DecoderFFmpeg::isBuffBlocked() {
 	bool ret = true;
 	if (mVideoInfo.isEnabled && mAudioInfo.isEnabled) {
-		//	Any buffer under BUFF_MIN then keep decoding. 
-		//	Both buffers over BUFF_MIN and under BUFF_MAX then keep decoding. 
-		//	Both buffers over BUFF_MIN but one of buffers over BUFF_MAX then block decoding to avoid unlimit buffering.
-		//	It could ensure that decoding thread would not be blocked by the case of one full and one empty.
-		if (mVideoFrames.size() <= BUFF_MIN || mAudioFrames.size() <= BUFF_MIN || (mVideoFrames.size() <= BUFF_MAX && mAudioFrames.size() <= BUFF_MAX)) {
+		if (mVideoFrames.size() <= mBuffMin || mAudioFrames.size() <= mBuffMin || (mVideoFrames.size() <= mBuffMax && mAudioFrames.size() <= mBuffMax)) {
 			ret = false;
 		}
 	} else {
 		if (mVideoInfo.isEnabled) {
-			ret = !(mVideoFrames.size() <= BUFF_MAX);
+			ret = !(mVideoFrames.size() <= mBuffMax);
 		} else if (mAudioInfo.isEnabled) {
-			ret = !(mAudioFrames.size() <= BUFF_MAX);
+			ret = !(mAudioFrames.size() <= mBuffMax);
 		}
 	}
 
@@ -366,6 +444,7 @@ void DecoderFFmpeg::updateVideoFrame() {
 		LOG("Error processing data. \n");
 		return;
 	}
+
 	mVideoFrames.push_back(frame);
 }
 
@@ -383,8 +462,8 @@ void DecoderFFmpeg::updateAudioFrame() {
 	frame->format = AV_SAMPLE_FMT_FLT;	//	For Unity format.
 	frame->best_effort_timestamp = frameDecoded->best_effort_timestamp;
 	swr_convert_frame(mSwrContext, frame, frameDecoded);
-	mAudioFrames.push_back(frame);
 
+	mAudioFrames.push_back(frame);
 	av_frame_free(&frameDecoded);
 }
 
@@ -397,7 +476,8 @@ void DecoderFFmpeg::freeAudioFrame() {
 }
 
 void DecoderFFmpeg::freeFrontFrame(std::list<AVFrame*>* frameBuff) {
-	if (!isInitialized || frameBuff->size() == 0) {
+	std::lock_guard<std::mutex> lock(mMutex);
+	if (!mIsInitialized || frameBuff->size() == 0) {
 		LOG("Not initialized or buffer empty. \n");
 		return;
 	}
@@ -410,7 +490,8 @@ void DecoderFFmpeg::freeFrontFrame(std::list<AVFrame*>* frameBuff) {
 
 //	frameBuff.clear would only clean the pointer rather than whole resources. So we need to clear frameBuff by ourself.
 void DecoderFFmpeg::flushBuffer(std::list<AVFrame*>* frameBuff) {
-	while (frameBuff->size() != 0) {
+	std::lock_guard<std::mutex> lock(mMutex);
+	while (!frameBuff->empty()) {
 		av_frame_free(&(frameBuff->front()));
 		frameBuff->pop_front();
 	}
@@ -419,7 +500,7 @@ void DecoderFFmpeg::flushBuffer(std::list<AVFrame*>* frameBuff) {
 //	Record buffer state either FULL or EMPTY. It would be considered by MediaDecoder.cs for buffering judgement.
 void DecoderFFmpeg::updateBufferState() {
 	if (mVideoInfo.isEnabled) {
-		if (mVideoFrames.size() >= BUFF_MAX) {
+		if (mVideoFrames.size() >= mBuffMax) {
 			mVideoInfo.bufferState = BufferState::FULL;
 		} else if(mVideoFrames.size() == 0) {
 			mVideoInfo.bufferState = BufferState::EMPTY;
@@ -429,7 +510,7 @@ void DecoderFFmpeg::updateBufferState() {
 	}
 
 	if (mAudioInfo.isEnabled) {
-		if (mAudioFrames.size() >= BUFF_MAX) {
+		if (mAudioFrames.size() >= mBuffMax) {
 			mAudioInfo.bufferState = BufferState::FULL;
 		} else if (mAudioFrames.size() == 0) {
 			mAudioInfo.bufferState = BufferState::EMPTY;
@@ -437,6 +518,52 @@ void DecoderFFmpeg::updateBufferState() {
 			mAudioInfo.bufferState = BufferState::NORMAL;
 		}
 	}
+}
+
+int DecoderFFmpeg::loadConfig() {
+	std::ifstream configFile("config", std::ifstream::in);
+	if (!configFile) {
+		LOG("config does not exist.\n");
+		return -1;
+	}
+
+	enum CONFIG { NONE, USE_TCP, BUFF_MIN, BUFF_MAX };
+	int buffMin = 0, buffMax = 0, tcp = 0;
+	std::string line;
+	while (configFile >> line) {
+		std::string token = line.substr(0, line.find("="));
+		CONFIG config = NONE;
+		if (token == "USE_TCP") { config = USE_TCP; }
+		else if (token == "BUFF_MIN") { config = BUFF_MIN; }
+		else if (token == "BUFF_MAX") { config = BUFF_MAX; }
+
+		std::string value = line.substr(line.find("=") + 1);
+		try {
+			switch (config) {
+			case USE_TCP:
+				tcp = stoi(value);
+				break;
+			case BUFF_MIN:
+				buffMin = stoi(value);
+				break;
+			case BUFF_MAX:
+				buffMax = stoi(value);
+				break;
+			}
+		} catch (...) {
+			return -1;
+		}
+	}
+
+	mUseTCP = tcp != 0;
+	mBuffMin = buffMin;
+	mBuffMax = buffMax;
+	LOG("config loading success.\n");
+	LOG("USE_TCP=%b\n", mUseTCP);
+	LOG("BUFF_MIN=%d\n", mBuffMin);
+	LOG("BUFF_MAX=%d\n", mBuffMax);
+
+	return 0;
 }
 
 void DecoderFFmpeg::printErrorMsg(int errorCode) {

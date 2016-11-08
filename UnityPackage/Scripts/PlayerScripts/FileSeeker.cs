@@ -11,7 +11,7 @@ namespace HTC.UnityPlugin.Multimedia
 		private const string LOG_TAG = "[FileSeeker]";
 
 		private List<FileInfo> contentInfo = new List<FileInfo>();
-		private int contentIndex = 0;
+		public int contentIndex { get; private set; }
 
 		public bool loadFolder(string path, string filter) {
 			if (!Directory.Exists(path)) {
@@ -56,19 +56,23 @@ namespace HTC.UnityPlugin.Multimedia
 		}
 
 		//  Index control
-		public void toNext() {
+		public int toNext() {
 			if (contentInfo.Count > 0) {
 				contentIndex = (contentIndex + 1) % contentInfo.Count;
 				Debug.Log(LOG_TAG + " To next file index:" + contentIndex);
 			}
+
+            return contentIndex;
 		}
 
-		public void toPrev() {
+		public int toPrev() {
 			if (contentInfo.Count > 0) {
 				contentIndex = (contentIndex + contentInfo.Count - 1) % contentInfo.Count;
 				Debug.Log(LOG_TAG + " To prev file index:" + contentIndex);
 			}
-		}
+
+            return contentIndex;
+        }
 
 		public void setIndex(int index) {
 			if (contentInfo.Count > 0) {

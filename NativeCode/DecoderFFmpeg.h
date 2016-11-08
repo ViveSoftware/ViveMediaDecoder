@@ -3,6 +3,7 @@
 #pragma once
 #include "IDecoder.h"
 #include <list>
+#include <mutex>
 
 extern "C" {
 #include <libavformat\avformat.h>
@@ -22,6 +23,9 @@ public:
 	
 	VideoInfo getVideoInfo();
 	AudioInfo getAudioInfo();
+	void setVideoEnable(bool isEnable);
+	void setAudioEnable(bool isEnable);
+	void setAudioAllChDataEnable(bool isEnable);
 	double	getVideoFrame(unsigned char** outputY, unsigned char** outputU, unsigned char** outputV);
 	double	getAudioFrame(unsigned char** outputFrame, int& frameSize);
 	void freeVideoFrame();
@@ -30,7 +34,9 @@ public:
 	int getMetaData(char**& key, char**& value);
 	
 private:
-	bool isInitialized;
+	bool mIsInitialized;
+	bool mIsAudioAllChEnabled;
+	bool mUseTCP;				//	For RTSP stream.
 
 	AVFormatContext* mAVFormatContext;
 	AVStream*		mVideoStream;
@@ -43,10 +49,11 @@ private:
 	AVPacket	mPacket;
 	std::list<AVFrame*> mVideoFrames;
 	std::list<AVFrame*> mAudioFrames;
-	const unsigned int BUFF_MAX = 128;
-	const unsigned int BUFF_MIN = 64;
+	unsigned int mBuffMax;
+	unsigned int mBuffMin;
 
 	SwrContext*	mSwrContext;
+	int initSwrContext();
 
 	VideoInfo	mVideoInfo;
 	AudioInfo	mAudioInfo;
@@ -59,6 +66,8 @@ private:
 	void updateAudioFrame();
 	void freeFrontFrame(std::list<AVFrame*>* frameBuff);
 	void flushBuffer(std::list<AVFrame*>* frameBuff);
+	std::mutex mMutex;
 
+	int loadConfig();
 	void printErrorMsg(int errorCode);
 };

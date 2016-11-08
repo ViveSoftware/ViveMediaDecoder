@@ -13,18 +13,25 @@ namespace HTC.UnityPlugin.Multimedia
 	public class MediaDecoder : MonoBehaviour
 	{
 		private const string NATIVE_LIBRARY_NAME = "MediaDecoder";
-		
-		[DllImport (NATIVE_LIBRARY_NAME)]
-		private static extern int nativeCreateDecoderAsync(string filePath, ref int id);
 
-		[DllImport (NATIVE_LIBRARY_NAME)]
-		private static extern int nativeGetDecoderState(int id);
+        //  Decoder
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern int nativeCreateDecoder(string filePath, ref int id);
 
-		[DllImport (NATIVE_LIBRARY_NAME)]
-		private static extern bool nativeStartDecoding(int id);
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern int nativeCreateDecoderAsync(string filePath, ref int id);
 
-		[DllImport (NATIVE_LIBRARY_NAME)]
-		private static extern void nativeDestroyDecoder (int id);
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern int nativeGetDecoderState(int id);
+
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern void nativeCreateTexture(int id, ref IntPtr tex0, ref IntPtr tex1, ref IntPtr tex2);
+
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern bool nativeStartDecoding(int id);
+
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern void nativeDestroyDecoder(int id);
 
         [DllImport(NATIVE_LIBRARY_NAME)]
         private static extern bool nativeIsBufferFull(int id);
@@ -32,49 +39,63 @@ namespace HTC.UnityPlugin.Multimedia
         [DllImport(NATIVE_LIBRARY_NAME)]
         private static extern bool nativeIsBufferEmpty(int id);
 
-        [DllImport (NATIVE_LIBRARY_NAME)]
-		private static extern void nativeSetSeekTime (int id, float sec);
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern bool nativeIsEOF(int id);
 
-		[DllImport (NATIVE_LIBRARY_NAME)]
-		private static extern bool nativeIsSeekOver(int id);
+        //  Video
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern bool nativeIsVideoEnabled(int id);
 
-		[DllImport (NATIVE_LIBRARY_NAME)]
-		private static extern bool nativeIsVideoEnabled (int id);
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern void nativeSetVideoEnable(int id, bool isEnable);
 
-		[DllImport (NATIVE_LIBRARY_NAME)]
-		private static extern void nativeGetVideoFormat(int id, ref int width, ref int height, ref float totalTime);
-		
-		[DllImport (NATIVE_LIBRARY_NAME)]
-		private static extern void nativeCreateTexture(int id, ref IntPtr tex0, ref IntPtr tex1, ref IntPtr tex2);
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern void nativeGetVideoFormat(int id, ref int width, ref int height, ref float totalTime);
 
-		[DllImport (NATIVE_LIBRARY_NAME)]
-		private static extern bool nativeIsAudioEnabled (int id);
-		
-		[DllImport (NATIVE_LIBRARY_NAME)]
-		private static extern float nativeGetAudioData(int id, ref IntPtr output, ref int frameSize);
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern void nativeSetVideoTime(int id, float currentTime);
+
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern bool nativeIsContentReady(int id);
+
+        //  Audio
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern bool nativeIsAudioEnabled(int id);
+
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern void nativeSetAudioEnable(int id, bool isEnable);
+
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern void nativeSetAudioAllChDataEnable(int id, bool isEnable);
+
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern void nativeGetAudioFormat(int id, ref int channel, ref int frequency, ref float totalTime);
+
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern float nativeGetAudioData(int id, ref IntPtr output, ref int lengthPerChannel);
 
         [DllImport(NATIVE_LIBRARY_NAME)]
         private static extern void nativeFreeAudioData(int id);
 
+        //  Seek
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern void nativeSetSeekTime(int id, float sec);
+
+        [DllImport(NATIVE_LIBRARY_NAME)]
+        private static extern bool nativeIsSeekOver(int id);
+
+        //  Utility
         [DllImport (NATIVE_LIBRARY_NAME)]
-		private static extern void nativeGetAudioFormat(int id, ref int channel, ref int frequency, ref float totalTime);
-
-		[DllImport (NATIVE_LIBRARY_NAME)]
-		private static extern void nativeSetVideoTime (int id, float currentTime);
-
-		[DllImport (NATIVE_LIBRARY_NAME)]
-		private static extern float nativeGetVideoCurrentTime(int id);
-
-		[DllImport (NATIVE_LIBRARY_NAME)]
-		private static extern bool nativeIsContentReady(int id);
-
-		[DllImport (NATIVE_LIBRARY_NAME)]
 		private static extern int nativeGetMetaData(string filePath, out IntPtr key, out IntPtr value);
 
-		[DllImport(NATIVE_LIBRARY_NAME)]
+        [DllImport (NATIVE_LIBRARY_NAME)]
+        private static extern void nativeLoadThumbnail(int id, float time, IntPtr texY, IntPtr texU, IntPtr texV);
+
+        //  Render event
+        [DllImport (NATIVE_LIBRARY_NAME)]
 		private static extern IntPtr GetRenderEventFunc();
 
-        private const string VERSION = "1.0.1.160908";
+        private const string VERSION = "1.0.7.161118";
 		public bool playOnAwake = false;
 		public string mediaPath = null;	            //	Assigned outside.
 		public UnityEvent onInitComplete = null;    //  Initialization is asynchronized. It would be invoked after initialization.
@@ -89,7 +110,8 @@ namespace HTC.UnityPlugin.Multimedia
 			START,
 			PAUSE,
 			SEEK_FRAME,
-            BUFFERING
+            BUFFERING,
+            EOF
 		};
 		private DecoderState lastState = DecoderState.NOT_INITIALIZED;
 		private DecoderState decoderState = DecoderState.NOT_INITIALIZED;
@@ -99,8 +121,9 @@ namespace HTC.UnityPlugin.Multimedia
 
 		public bool isVideoEnabled { get; private set; }
 		public bool isAudioEnabled { get; private set; }
+        private bool isAllAudioChEnabled = false;
 
-		private bool useDefault = true;             //  This flag is used to set default texture bfore video initialized.
+        private bool useDefault = true;             //  This flag is used to set default texture before video initialized.
 		private bool seekPreview = false;           //  This flag is to preview first frame of seeking when seek under paused state.
 		private Texture2D videoTexYch = null;
 		private Texture2D videoTexUch = null;
@@ -112,9 +135,9 @@ namespace HTC.UnityPlugin.Multimedia
         private const int SWAP_BUFFER_NUM = 4;		//	How many audio source to swap.
 		private AudioSource[] audioSource = new AudioSource[SWAP_BUFFER_NUM];
 		private List<float> audioDataBuff = null;   //  Buffer to keep audio data decoded from native.
-		private int audioFrequency = 0;
-		private int audioChannel = 0;
-		private const double OVERLAP_TIME = 0.01;   //  Our audio clip is defined as: [overlay][audio data][overlap].
+		public int audioFrequency { get; private set; }
+        public int audioChannels { get; private set; }
+        private const double OVERLAP_TIME = 0.01;   //  Our audio clip is defined as: [overlay][audio data][overlap].
         private int audioOverlapLength = 0;         //  OVERLAP_TIME * audioFrequency.
         private int audioDataLength = 0;            //  (AUDIO_FRAME_SIZE + 2 * audioOverlapLength) * audioChannel.
         private float volume = 1.0f;
@@ -139,11 +162,6 @@ namespace HTC.UnityPlugin.Multimedia
 
         //  Video progress is triggered using Update. Progress time would be set by nativeSetVideoTime.
         void Update() {
-            if (decoderState == DecoderState.START && nativeIsBufferEmpty(decoderID)) {
-                decoderState = DecoderState.BUFFERING;
-                hangTime = AudioSettings.dspTime - globalStartTime;
-            }
-
             switch (decoderState) {
 				case DecoderState.START:
 					if (isVideoEnabled) {
@@ -158,7 +176,7 @@ namespace HTC.UnityPlugin.Multimedia
 						double setTime = AudioSettings.dspTime - globalStartTime;
 
 						//	Normal update frame.
-						if (setTime < videoTotalTime) {
+						if (setTime < videoTotalTime || videoTotalTime == -1.0f) {
 							if (seekPreview && nativeIsContentReady(decoderID)) {
 								setPause();
 								seekPreview = false;
@@ -171,6 +189,12 @@ namespace HTC.UnityPlugin.Multimedia
 							isVideoReadyToReplay = true;
 						}
 					}
+
+                    if (nativeIsBufferEmpty(decoderID) && !nativeIsEOF(decoderID)) {
+                        decoderState = DecoderState.BUFFERING;
+                        hangTime = AudioSettings.dspTime - globalStartTime;
+                    }
+
 					break;
 
 				case DecoderState.SEEK_FRAME:
@@ -185,29 +209,35 @@ namespace HTC.UnityPlugin.Multimedia
 					break;
 
                 case DecoderState.BUFFERING:
-                    if (nativeIsBufferFull(decoderID)) {
+                    if (nativeIsBufferFull(decoderID) || nativeIsEOF(decoderID)) {
                         decoderState = DecoderState.START;
                         globalStartTime = AudioSettings.dspTime - hangTime;
                     }
                     break;
 
                 case DecoderState.PAUSE:
+                case DecoderState.EOF:
                 default:
 					break;
 			}
 
 			if (isVideoEnabled || isAudioEnabled) {
 				if ((!isVideoEnabled || isVideoReadyToReplay) && (!isAudioEnabled || isAudioReadyToReplay)) {
-					if (onVideoEnd != null) {
+                    decoderState = DecoderState.EOF;
+                    isVideoReadyToReplay = isAudioReadyToReplay = false;
+
+                    if (onVideoEnd != null) {
 						onVideoEnd.Invoke();
 					}
-				}
+                }
 			}
 		}
-
-		public void initDecoder(string path) {
-			StartCoroutine(initDecoderAsync(path));
-		}
+        
+        public void initDecoder(string path, bool enableAllAudioCh = false) {
+            isAllAudioChEnabled = enableAllAudioCh;
+            StartCoroutine(initDecoderAsync(path));
+        }
+        
 		IEnumerator initDecoderAsync(string path) {
 			print(LOG_TAG + " init Decoder.");
 			decoderState = DecoderState.INITIALIZING;
@@ -229,7 +259,7 @@ namespace HTC.UnityPlugin.Multimedia
 				if (isVideoEnabled) {
 					float duration = 0.0f;
 					nativeGetVideoFormat(decoderID, ref videoWidth, ref videoHeight, ref duration);
-					videoTotalTime = duration;
+					videoTotalTime = duration > 0 ? duration : -1.0f ;
 					print(LOG_TAG + " Video format: (" + videoWidth + ", " + videoHeight + ")");
 					print(LOG_TAG + " Total time: " + videoTotalTime);
 
@@ -241,23 +271,14 @@ namespace HTC.UnityPlugin.Multimedia
 				isAudioEnabled = nativeIsAudioEnabled(decoderID);
 				print(LOG_TAG + " isAudioEnabled = " + isAudioEnabled);
 				if (isAudioEnabled) {
-					float duration = 0.0f;
-					nativeGetAudioFormat(decoderID, ref audioChannel, ref audioFrequency, ref duration);
-					audioTotalTime = duration;
-                    audioOverlapLength = (int) (OVERLAP_TIME * audioFrequency + 0.5f);
-					print(LOG_TAG + " audioChannel " + audioChannel);
-					print(LOG_TAG + " audioFrequency " + audioFrequency);
-					print(LOG_TAG + " audioTotalTime " + audioTotalTime);
-
-                    audioDataLength = (AUDIO_FRAME_SIZE + 2 * audioOverlapLength) * audioChannel;
-					for (int i = 0; i < SWAP_BUFFER_NUM; i++) {
-						audioSource[i] = gameObject.AddComponent<AudioSource>();
-						audioSource[i].clip = AudioClip.Create("testSound" + i, audioDataLength, audioChannel, audioFrequency, false);
-						audioSource[i].playOnAwake = false;
-						audioSource[i].volume = volume;
-						audioSource[i].minDistance = audioSource[i].maxDistance;
-					}
-				}
+                    if (isAllAudioChEnabled) {
+                        nativeSetAudioAllChDataEnable(decoderID, isAllAudioChEnabled);
+                        getAudioFormat();
+                    } else {
+                        getAudioFormat();
+                        initAudioSource();
+                    }
+                }
 
 				decoderState = DecoderState.INITIALIZED;
 
@@ -269,6 +290,35 @@ namespace HTC.UnityPlugin.Multimedia
 				decoderState = DecoderState.INIT_FAIL;
 			}
 		}
+
+        private void getAudioFormat() {
+            int channels = 0;
+            int freqency = 0;
+            float duration = 0.0f;
+            nativeGetAudioFormat(decoderID, ref channels, ref freqency, ref duration);
+            audioChannels = channels;
+            audioFrequency = freqency;
+            audioTotalTime = duration > 0 ? duration : -1.0f;
+            print(LOG_TAG + " audioChannel " + audioChannels);
+            print(LOG_TAG + " audioFrequency " + audioFrequency);
+            print(LOG_TAG + " audioTotalTime " + audioTotalTime);
+        }
+
+        private void initAudioSource() {
+            getAudioFormat();
+            audioOverlapLength = (int) (OVERLAP_TIME * audioFrequency + 0.5f);
+
+            audioDataLength = (AUDIO_FRAME_SIZE + 2 * audioOverlapLength) * audioChannels;
+            for (int i = 0; i < SWAP_BUFFER_NUM; i++) {
+                if (audioSource[i] == null) {
+                    audioSource[i] = gameObject.AddComponent<AudioSource>();
+                }
+                audioSource[i].clip = AudioClip.Create("testSound" + i, audioDataLength, audioChannels, audioFrequency, false);
+                audioSource[i].playOnAwake = false;
+                audioSource[i].volume = volume;
+                audioSource[i].minDistance = audioSource[i].maxDistance;
+            }
+        }
 		
 		public void startDecoding() {
 			if(decoderState == DecoderState.INITIALIZED) {
@@ -281,7 +331,7 @@ namespace HTC.UnityPlugin.Multimedia
 
                 globalStartTime = AudioSettings.dspTime;
 				isVideoReadyToReplay = isAudioReadyToReplay = false;
-				if(isAudioEnabled) {
+				if(isAudioEnabled && !isAllAudioChEnabled) {
 					StartCoroutine ("audioPlay");
 				}
 			}
@@ -320,12 +370,35 @@ namespace HTC.UnityPlugin.Multimedia
 		}
 
 		public void replay() {
-			if (decoderState == DecoderState.START || decoderState == DecoderState.PAUSE) {
-				globalStartTime = AudioSettings.dspTime;
-				isVideoReadyToReplay = isAudioReadyToReplay = false;
-				setSeekTime(0.0f);
-			}
+            if (setSeekTime(0.0f)) {
+                globalStartTime = AudioSettings.dspTime;
+                isVideoReadyToReplay = isAudioReadyToReplay = false;
+            }
 		}
+
+        public void getAllAudioChannelData(out float[] data, out double time, out int samplesPerChannel) {
+            if (!isAllAudioChEnabled) {
+                print(LOG_TAG + " this function only works for isAllAudioEnabled == true.");
+                data = null;
+                time = 0;
+                samplesPerChannel = 0;
+                return;
+            }
+
+            IntPtr dataPtr = new IntPtr();
+            int lengthPerChannel = 0;
+            double audioNativeTime = nativeGetAudioData(decoderID, ref dataPtr, ref lengthPerChannel);
+            float[] buff = null;
+            if (lengthPerChannel > 0) {
+                buff = new float[lengthPerChannel * audioChannels];
+                Marshal.Copy(dataPtr, buff, 0, buff.Length);
+                nativeFreeAudioData(decoderID);
+            }
+
+            data = buff;
+            time = audioNativeTime;
+            samplesPerChannel = lengthPerChannel;
+        }
 
 		IEnumerator audioPlay() {
 			print (LOG_TAG + " start audio play coroutine.");
@@ -334,7 +407,7 @@ namespace HTC.UnityPlugin.Multimedia
 			float[] tempBuff = new float[0];    //	Buffer to get audio data from dataPtr.
 			double audioDataTime = (double) AUDIO_FRAME_SIZE / audioFrequency;
 			double lastTime = -1.0f;            //	Avoid to schedule the same audio data set.
-            int playedAudioDataLength = AUDIO_FRAME_SIZE * audioChannel; //  Data length exclude the overlap length.
+            int playedAudioDataLength = AUDIO_FRAME_SIZE * audioChannels; //  Data length exclude the overlap length.
             audioDataBuff = new List<float>();
 
             print(LOG_TAG + " audioDataTime " + audioDataTime);
@@ -343,10 +416,10 @@ namespace HTC.UnityPlugin.Multimedia
 			while(decoderState >= DecoderState.START) {
 				if(decoderState != DecoderState.PAUSE && decoderState != DecoderState.BUFFERING) {
 					double currentTime = AudioSettings.dspTime - globalStartTime;
-					if(currentTime < audioTotalTime) {
+					if(currentTime < audioTotalTime || audioTotalTime == -1.0f) {
 						int audioFrameLength = 0;
 						double audioNativeTime = nativeGetAudioData (decoderID, ref dataPtr, ref audioFrameLength);
-                        if (0 < audioNativeTime && lastTime != audioNativeTime && decoderState != DecoderState.SEEK_FRAME) {
+                        if (0 < audioNativeTime && lastTime != audioNativeTime && decoderState != DecoderState.SEEK_FRAME && audioFrameLength != 0) {
                             if (audioProgressTime == -1.0) {
                                 //  To simplify, the first overlap data would not be played.
                                 //  Correct the audio progress time by adding OVERLAP_TIME.
@@ -354,7 +427,7 @@ namespace HTC.UnityPlugin.Multimedia
                             }
 
                             lastTime = audioNativeTime;
-                            audioFrameLength *= audioChannel;
+                            audioFrameLength *= audioChannels;
                             if (tempBuff.Length != audioFrameLength) {
                                 //  For the case of dynamic audio data length, reallocate the memory if needed.
                                 tempBuff = new float[audioFrameLength];
@@ -396,16 +469,16 @@ namespace HTC.UnityPlugin.Multimedia
 						//print(LOG_TAG + " Audio reach EOF. Prepare replay.");
 						isAudioReadyToReplay = true;
 						audioProgressTime = -1.0;
-						audioDataBuff.Clear();
-					}
+                        audioDataBuff.Clear();
+                    }
 				}
 				yield return null;
 			}
 
 			Marshal.Release(dataPtr);
-			audioDataBuff.Clear();
-			audioDataBuff = null;
-		}
+            audioDataBuff.Clear();
+            audioDataBuff = null;
+        }
 
 		public void stopDecoding() {
 			if(decoderState >= DecoderState.INITIALIZING) {
@@ -432,53 +505,65 @@ namespace HTC.UnityPlugin.Multimedia
 
 				isVideoEnabled = isAudioEnabled = false;
 				isVideoReadyToReplay = isAudioReadyToReplay = false;
-			}
+                isAllAudioChEnabled = false;
+            }
 		}
 
-		public void setSeekTime(float seekTime) {
-			if(decoderState != DecoderState.SEEK_FRAME && decoderState >= DecoderState.START) {
-				float setTime = 0.0f;
-				if(	(isVideoEnabled && seekTime > videoTotalTime)	|| 
-					(isAudioEnabled && seekTime > audioTotalTime)	||
-					isVideoReadyToReplay || isAudioReadyToReplay	||
-					seekTime < 0.0f) {
-					print (LOG_TAG + " Seek over end. ");
-					setTime = 0.0f;
-				} else {
-					setTime = seekTime;
-				}
+		public bool setSeekTime(float seekTime) {
+            if (decoderState != DecoderState.SEEK_FRAME && decoderState >= DecoderState.START) {
+                lastState = decoderState;
+                decoderState = DecoderState.SEEK_FRAME;
 
-				lastState = decoderState;
-				decoderState = DecoderState.SEEK_FRAME;
-				print (LOG_TAG + " set seek time: " + setTime);
-				hangTime = setTime;
-				nativeSetSeekTime(decoderID, setTime);
-				nativeSetVideoTime(decoderID, (float) setTime);
+                float setTime = 0.0f;
+                if ((isVideoEnabled && seekTime > videoTotalTime) ||
+                    (isAudioEnabled && seekTime > audioTotalTime) ||
+                    isVideoReadyToReplay || isAudioReadyToReplay ||
+                    seekTime < 0.0f) {
+                    print(LOG_TAG + " Seek over end. ");
+                    setTime = 0.0f;
+                } else {
+                    setTime = seekTime;
+                }
+                
+                print(LOG_TAG + " set seek time: " + setTime);
+                hangTime = setTime;
+                nativeSetSeekTime(decoderID, setTime);
+                nativeSetVideoTime(decoderID, (float) setTime);
 
-				if (isAudioEnabled) {
-					audioDataBuff.Clear();
-					audioProgressTime = -1.0;
-					foreach (AudioSource src in audioSource) {
-						src.Stop();
-					}
-				}
-			}
+                if (isAudioEnabled) {
+                    audioDataBuff.Clear();
+                    audioProgressTime = -1.0;
+                    foreach (AudioSource src in audioSource) {
+                        src.Stop();
+                    }
+                }
+
+                return true;
+            } else {
+                return false;
+            }
 		}
 		
 		public bool isSeeking() {
 			return decoderState >= DecoderState.INITIALIZED && (decoderState == DecoderState.SEEK_FRAME || !nativeIsContentReady(decoderID));
 		}
 
+        public bool isVideoEOF() {
+            return decoderState == DecoderState.EOF;
+        }
+
 		public void setStepForward(float sec) {
-			print(LOG_TAG + " set forward : " + sec);
 			double targetTime = AudioSettings.dspTime - globalStartTime + sec;
-			setSeekTime((float) targetTime);
+            if (setSeekTime((float) targetTime)) {
+                print(LOG_TAG + " set forward : " + sec);
+            }
 		}
 
 		public void setStepBackward(float sec) {
-			print(LOG_TAG + " set backward : " + sec);
 			double targetTime = AudioSettings.dspTime - globalStartTime - sec;
-			setSeekTime((float) targetTime);
+            if (setSeekTime((float) targetTime)) {
+                print(LOG_TAG + " set backward : " + sec);
+            }
 		}
 
 		public void getVideoResolution(ref int width, ref int height) {
@@ -571,7 +656,56 @@ namespace HTC.UnityPlugin.Multimedia
 			value = valArray;
 		}
 
-		void OnApplicationQuit() {
+        public static void loadVideoThumb(GameObject obj, string filePath, float time)
+        {
+            if (!System.IO.File.Exists(filePath)) {
+                print(LOG_TAG + " File not found!");
+                return;
+            }
+
+            int decID = -1;
+            int width = 0;
+            int height = 0;
+            float totalTime = 0.0f;
+            nativeCreateDecoder(filePath, ref decID);
+            nativeGetVideoFormat(decID, ref width, ref height, ref totalTime);
+            if (!nativeStartDecoding(decID)) {
+                print(LOG_TAG + " Decoding not start.");
+                return;
+            }
+
+            Texture2D thumbY = new Texture2D(width, height, TextureFormat.Alpha8, false);
+            Texture2D thumbU = new Texture2D(width / 2, height / 2, TextureFormat.Alpha8, false);
+            Texture2D thumbV = new Texture2D(width / 2, height / 2, TextureFormat.Alpha8, false);
+            Material thumbMat = obj.GetComponent<MeshRenderer>().material;
+            if (thumbMat == null) {
+                print(LOG_TAG + " Target has no MeshRenderer.");
+                nativeDestroyDecoder(decID);
+                return;
+            }
+            thumbMat.SetTexture("_YTex", thumbY);
+            thumbMat.SetTexture("_UTex", thumbU);
+            thumbMat.SetTexture("_VTex", thumbV);
+            
+            nativeLoadThumbnail(decID, time, thumbY.GetNativeTexturePtr(), thumbU.GetNativeTexturePtr(), thumbV.GetNativeTexturePtr());
+            nativeDestroyDecoder(decID);
+        }
+
+        public void setAudioEnable(bool isEnable) {
+            nativeSetAudioEnable(decoderID, isEnable);
+            if (isEnable) {
+                setSeekTime(getVideoCurrentTime());
+            }
+        }
+
+        public void setVideoEnable(bool isEnable) {
+            nativeSetVideoEnable(decoderID, isEnable);
+            if (isEnable) {
+                setSeekTime(getVideoCurrentTime());
+            }
+        }
+
+        void OnApplicationQuit() {
 			print (LOG_TAG + " OnApplicationQuit");
 			stopDecoding ();
 		}

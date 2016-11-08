@@ -40,7 +40,6 @@ static void DoEventGraphicsDeviceD3D11(UnityGfxDeviceEventType eventType)
 static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType eventType)
 {
 	UnityGfxRenderer currentDeviceType = s_DeviceType;
-
 	switch (eventType)
 	{
 	case kUnityGfxDeviceEventInitialize:
@@ -83,12 +82,16 @@ extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginUnload()
 }
 // --------------------------------------------------------------------------
 
-VideoContextIter getVideoContextIter(int id) {
+bool getVideoContextIter(int id, VideoContextIter* iter) {
 	for (VideoContextIter it = videoContexts.begin(); it != videoContexts.end(); it++) {
-		if (it->id == id) { return it; }
+		if (it->id == id) {
+			*iter = it;
+			return true;
+		}
 	}
 
-	return videoContexts.end();
+	LOG("Decoder does not exist. \n");
+	return false;
 }
 
 void DoRendering(int id);
@@ -115,8 +118,8 @@ void DoRendering (int id)
 		ID3D11DeviceContext* ctx = NULL;
 		g_D3D11Device->GetImmediateContext (&ctx);
 
-		VideoContextIter iter = getVideoContextIter(id);
-		if (iter != videoContexts.end()) {
+		VideoContextIter iter;
+		if (getVideoContextIter(id, &iter)) {
 			VideoContext* localVideoContext = &(*iter);
 			AVHandler* localAVHandler = localVideoContext->avhandler;
 
@@ -129,12 +132,15 @@ void DoRendering (int id)
 				}
 
 				double videoDecCurTime = localAVHandler->getVideoInfo().lastTime;
+				LOG("videoDecCurTime = %f \n", videoDecCurTime);
 				if (videoDecCurTime <= localVideoContext->progressTime) {
 					uint8_t* ptrY = NULL;
 					uint8_t* ptrU = NULL;
 					uint8_t* ptrV = NULL;
 					double curFrameTime = localAVHandler->getVideoFrame(&ptrY, &ptrU, &ptrV);
+					LOG("getVideoFrame Yptr = %p \n", ptrY);
 					if (ptrY != NULL && curFrameTime != -1 && localVideoContext->lastUpdateTime != curFrameTime) {
+						LOG("texture upload \n");
 						localVideoContext->textureObj->upload(ptrY, ptrU, ptrV);
 						localVideoContext->lastUpdateTime = (float)curFrameTime;
 						localVideoContext->isContentReady = true;
@@ -148,8 +154,11 @@ void DoRendering (int id)
 }
 
 int nativeCreateDecoderAsync(const char* filePath, int& id) {
+	LOG("Query available decoder id. \n");
+
 	int newID = 0;
-	while (getVideoContextIter(newID) != videoContexts.end()) { newID++; }
+	VideoContextIter iter;
+	while (getVideoContextIter(newID, &iter)) { newID++; }
 
 	VideoContext context;
 	context.avhandler = new AVHandler();
@@ -160,7 +169,7 @@ int nativeCreateDecoderAsync(const char* filePath, int& id) {
 	context.isContentReady = false;
 	videoContexts.push_back(std::move(context));
 
-	VideoContextIter iter = getVideoContextIter(id);
+	getVideoContextIter(id, &iter);
 	iter->initThread = std::thread([iter]() {
 		iter->avhandler->init(iter->path);
 	});
@@ -168,9 +177,13 @@ int nativeCreateDecoderAsync(const char* filePath, int& id) {
 	return 0;
 }
 
+//	Synchronized init. Used for thumbnail currently.
 int nativeCreateDecoder(const char* filePath, int& id) {
+	LOG("Query available decoder id. \n");
+
 	int newID = 0;
-	while (getVideoContextIter(newID) != videoContexts.end()) { newID++; }
+	VideoContextIter iter;
+	while (getVideoContextIter(newID, &iter)) { newID++; }
 
 	VideoContext context;
 	context.avhandler = new AVHandler();
@@ -186,223 +199,228 @@ int nativeCreateDecoder(const char* filePath, int& id) {
 }
 
 int nativeGetDecoderState(int id) {
-	VideoContextIter iter = getVideoContextIter(id);
-	if (iter != videoContexts.end() && iter->avhandler != NULL) {
-		return iter->avhandler->getDecoderState();
-	} else {
-		return -1;
-	}
+	VideoContextIter iter;
+	if (!getVideoContextIter(id, &iter) || iter->avhandler == NULL) { return -1; }
+		
+	return iter->avhandler->getDecoderState();
 }
 
 void nativeCreateTexture(int id, void*& tex0, void*& tex1, void*& tex2) {
-	VideoContextIter iter = getVideoContextIter(id);
-	if (iter != videoContexts.end() && iter->textureObj != NULL) {
-		iter->textureObj->getResourcePointers(tex0, tex1, tex2);
-	}
+	VideoContextIter iter;
+	if (!getVideoContextIter(id, &iter) || iter->textureObj == NULL) { return; }
+
+	iter->textureObj->getResourcePointers(tex0, tex1, tex2);
 }
 
 bool nativeStartDecoding(int id) {
-	VideoContextIter iter = getVideoContextIter(id);
-	if (iter != videoContexts.end() && iter->avhandler != NULL) {
-		if (iter->initThread.joinable()) {
-			iter->initThread.join();
-		}
+	VideoContextIter iter;
+	if (!getVideoContextIter(id, &iter) || iter->avhandler == NULL) { return false; }
 
-		AVHandler* avhandler = iter->avhandler;
-		if (avhandler->getDecoderState() >= AVHandler::DecoderState::INITIALIZED) {
-			avhandler->startDecoding();
-		}
-
-		if (!avhandler->getVideoInfo().isEnabled) {
-			iter->isContentReady = true;
-		}
-
-		return true;
-	} else {
-		LOG("avHandler is NULL. \n");
-		return false;
+	if (iter->initThread.joinable()) {
+		iter->initThread.join();
 	}
+
+	AVHandler* avhandler = iter->avhandler;
+	if (avhandler->getDecoderState() >= AVHandler::DecoderState::INITIALIZED) {
+		avhandler->startDecoding();
+	}
+
+	if (!avhandler->getVideoInfo().isEnabled) {
+		iter->isContentReady = true;
+	}
+
+	return true;
 }
 
 void nativeDestroyDecoder(int id) {
-	VideoContextIter iter = getVideoContextIter(id);
-	if (iter != videoContexts.end()) {
-		LOG("nativeDestroyDecoder %d. \n", id);
-		iter->id = -1;
-		if (iter->initThread.joinable()) {
-			iter->initThread.join();
-		}
+	VideoContextIter iter;
+	if (!getVideoContextIter(id, &iter)) { return; }
 
-		if (iter->avhandler != NULL) {
-			delete (iter->avhandler);
-			iter->avhandler = NULL;
-		}
-
-		if (iter->path != NULL) {
-			free(iter->path);
-			iter->path = NULL;
-		}
-
-		iter->progressTime = 0.0f;
-		iter->lastUpdateTime = 0.0f;
-
-		if (iter->textureObj != NULL) {
-			delete (iter->textureObj);
-			iter->textureObj = NULL;
-		}
-
-		iter->isContentReady = false;
-
-		videoContexts.erase(iter);
+	iter->id = -1;
+	if (iter->initThread.joinable()) {
+		iter->initThread.join();
 	}
+
+	if (iter->avhandler != NULL) {
+		delete (iter->avhandler);
+		iter->avhandler = NULL;
+	}
+
+	if (iter->path != NULL) {
+		free(iter->path);
+		iter->path = NULL;
+	}
+
+	iter->progressTime = 0.0f;
+	iter->lastUpdateTime = 0.0f;
+
+	if (iter->textureObj != NULL) {
+		delete (iter->textureObj);
+		iter->textureObj = NULL;
+	}
+
+	iter->isContentReady = false;
+
+	videoContexts.erase(iter);
 }
 
 //	Video
 bool nativeIsVideoEnabled(int id) {
-	VideoContextIter iter = getVideoContextIter(id);
-	if (iter != videoContexts.end() && iter->avhandler->getDecoderState() >= AVHandler::DecoderState::INITIALIZED) {
-		bool ret = iter->avhandler->getVideoInfo().isEnabled;
-		LOG("nativeIsVideoEnabled: %s \n", ret ? "true" : "false");
-		return ret;
-	}
-	LOG("decoder is unavailable. \n");
+	VideoContextIter iter;
+	if (!getVideoContextIter(id, &iter)) { return false; }
 
-	return false;
+	if (iter->avhandler->getDecoderState() < AVHandler::DecoderState::INITIALIZED) {
+		LOG("Decoder is unavailable currently. \n");
+		return false;
+	}
+
+	bool ret = iter->avhandler->getVideoInfo().isEnabled;
+	LOG("nativeIsVideoEnabled: %s \n", ret ? "true" : "false");
+	return ret;
 }
 
 void nativeGetVideoFormat(int id, int& width, int& height, float& totalTime) {
-	VideoContextIter iter = getVideoContextIter(id);
-	if (iter != videoContexts.end() && iter->avhandler->getDecoderState() >= AVHandler::DecoderState::INITIALIZED) {
-		IDecoder::VideoInfo* videoInfo = &(iter->avhandler->getVideoInfo());
-		width = videoInfo->width;
-		height = videoInfo->height;
-		totalTime = (float) (videoInfo->totalTime);
-	} else {
-		LOG("decoder is unavailable. \n");
+	VideoContextIter iter;
+	if (!getVideoContextIter(id, &iter)) { return; }
+
+	if (iter->avhandler->getDecoderState() < AVHandler::DecoderState::INITIALIZED) {
+		LOG("Decoder is unavailable currently. \n");
+		return;
 	}
+
+	IDecoder::VideoInfo* videoInfo = &(iter->avhandler->getVideoInfo());
+	width = videoInfo->width;
+	height = videoInfo->height;
+	totalTime = (float)(videoInfo->totalTime);
 }
 
 void nativeSetVideoTime(int id, float currentTime) {
-	VideoContextIter iter = getVideoContextIter(id);
-	if (iter != videoContexts.end()) {
-		iter->progressTime = currentTime;
-	}
+	VideoContextIter iter;
+	if (!getVideoContextIter(id, &iter)) { return; }
+
+	iter->progressTime = currentTime;
 }
 
 bool nativeIsAudioEnabled(int id) {
-	VideoContextIter iter = getVideoContextIter(id);
-	if (iter != videoContexts.end() && iter->avhandler->getDecoderState() >= AVHandler::DecoderState::INITIALIZED) {
-		bool ret = iter->avhandler->getAudioInfo().isEnabled;
-		LOG("nativeIsAudioEnabled: %s \n", ret ? "true" : "false");
-		return ret;
-	}
-	LOG("avHandler is NULL. \n");
+	VideoContextIter iter;
+	if (!getVideoContextIter(id, &iter)) { return false; }
 
-	return false;
+	if (iter->avhandler->getDecoderState() < AVHandler::DecoderState::INITIALIZED) {
+		LOG("Decoder is unavailable currently. \n");
+		return false;
+	}
+
+	bool ret = iter->avhandler->getAudioInfo().isEnabled;
+	LOG("nativeIsAudioEnabled: %s \n", ret ? "true" : "false");
+	return ret;
 }
 
 void nativeGetAudioFormat(int id, int& channel, int& frequency, float& totalTime) {
-	VideoContextIter iter = getVideoContextIter(id);
-	if (iter != videoContexts.end() && iter->avhandler->getDecoderState() >= AVHandler::DecoderState::INITIALIZED) {
-		IDecoder::AudioInfo* audioInfo = &(iter->avhandler->getAudioInfo());
-		channel = audioInfo->channels;
-		frequency = audioInfo->sampleRate;
-		totalTime = (float) (audioInfo->totalTime);
+	VideoContextIter iter;
+	if (!getVideoContextIter(id, &iter)) { return; }
+
+	if (iter->avhandler->getDecoderState() < AVHandler::DecoderState::INITIALIZED) {
+		LOG("Decoder is unavailable currently. \n");
+		return;
 	}
+
+	IDecoder::AudioInfo* audioInfo = &(iter->avhandler->getAudioInfo());
+	channel = audioInfo->channels;
+	frequency = audioInfo->sampleRate;
+	totalTime = (float)(audioInfo->totalTime);
 }
 
 float nativeGetAudioData(int id, unsigned char** audioData, int& frameSize) {
-	VideoContextIter iter = getVideoContextIter(id);
-	if (iter != videoContexts.end()) {
-		return (float) (iter->avhandler->getAudioFrame(audioData, frameSize));
-	} else {
-		return -1.0f;
-	}
+	VideoContextIter iter;
+	if (!getVideoContextIter(id, &iter)) { return -1.0f; }
+
+	return (float) (iter->avhandler->getAudioFrame(audioData, frameSize));
 }
 
 void nativeFreeAudioData(int id) {
-	VideoContextIter iter = getVideoContextIter(id);
-	if (iter != videoContexts.end()) {
-		iter->avhandler->freeAudioFrame();
-	}
+	VideoContextIter iter;
+	if (!getVideoContextIter(id, &iter)) { return; }
+	
+	iter->avhandler->freeAudioFrame();
 }
 
 void nativeSetSeekTime(int id, float sec) {
-	VideoContextIter iter = getVideoContextIter(id);
-	if (iter != videoContexts.end() && iter->avhandler->getDecoderState() >= AVHandler::DecoderState::INITIALIZED) {
-		LOG("nativeSetSeekTime %f. \n", sec);
-		iter->avhandler->setSeekTime(sec);
-		if (!iter->avhandler->getVideoInfo().isEnabled) {
-			iter->isContentReady = true;
-		} else {
-			iter->isContentReady = false;
-		}
+	VideoContextIter iter;
+	if (!getVideoContextIter(id, &iter)) { return; }
+
+	if (iter->avhandler->getDecoderState() < AVHandler::DecoderState::INITIALIZED) {
+		LOG("Decoder is unavailable currently. \n");
+		return;
+	}
+
+	LOG("nativeSetSeekTime %f. \n", sec);
+	iter->avhandler->setSeekTime(sec);
+	if (!iter->avhandler->getVideoInfo().isEnabled) {
+		iter->isContentReady = true;
+	} else {
+		iter->isContentReady = false;
 	}
 }
 
 bool nativeIsSeekOver(int id) {
-	VideoContextIter iter = getVideoContextIter(id);
-	if (iter != videoContexts.end()) {
-		return !(iter->avhandler->getDecoderState() == AVHandler::DecoderState::SEEK);
-	}
-	return false;
+	VideoContextIter iter;
+	if (!getVideoContextIter(id, &iter)) { return false; }
+	
+	return !(iter->avhandler->getDecoderState() == AVHandler::DecoderState::SEEK);
 }
 
 bool nativeIsBufferFull(int id) {
-	VideoContextIter iter = getVideoContextIter(id);
-	if (iter != videoContexts.end()) {
-		return iter->avhandler->isBufferFull();
-	}
-	return false;
+	VideoContextIter iter;
+	if (!getVideoContextIter(id, &iter)) { return false; }
+
+	return iter->avhandler->isBufferFull();
 }
 
 bool nativeIsBufferEmpty(int id) {
-	VideoContextIter iter = getVideoContextIter(id);
-	if (iter != videoContexts.end()) {
-		return iter->avhandler->isBufferEmpty();
-	}
-	return false;
+	VideoContextIter iter;
+	if (!getVideoContextIter(id, &iter)) { return false; }
+	
+	return iter->avhandler->isBufferEmpty();
 }
 
 /*	This function is for thumbnail extraction.*/
-void nativeUpdateThumbnail(int id, void* texY, void* texU, void* texV, float time) {
-	VideoContextIter iter = getVideoContextIter(id);
-	if (iter != videoContexts.end()) {
-		//	1.Initialize variable and texture
-		AVHandler* avhandler = iter->avhandler;
-		IDecoder::VideoInfo* videoInfo = &(avhandler->getVideoInfo());
-		int width = (int) (ceil((float) videoInfo->width / ITextureObject::CPU_ALIGMENT) * ITextureObject::CPU_ALIGMENT);
-		int height = videoInfo->height;
-		float targetTime = time;
+void nativeLoadThumbnail(int id, float time, void* texY, void* texU, void* texV) {
+	if (g_D3D11Device == NULL) {
+		LOG("g_D3D11Device is null. \n");
+		return;
+	}
+
+	VideoContextIter iter;
+	if (!getVideoContextIter(id, &iter)) { return; }
+
+	//	1.Initialize variable and texture
+	AVHandler* avhandler = iter->avhandler;
+	IDecoder::VideoInfo* videoInfo = &(avhandler->getVideoInfo());
+	int width = (int) (ceil((float) videoInfo->width / ITextureObject::CPU_ALIGMENT) * ITextureObject::CPU_ALIGMENT);
+	int height = videoInfo->height;
+
+	//	2.Get thumbnail data and update texture
+	std::thread thumbnailThread([&]() {
+		uint8_t* yptr = NULL, *uptr = NULL, *vptr = NULL;
+		avhandler->setSeekTime(time);
+			
+		avhandler->getVideoFrame(&yptr, &uptr, &vptr);
+		while (yptr == NULL) {
+			avhandler->freeVideoFrame();
+			avhandler->getVideoFrame(&yptr, &uptr, &vptr);
+		}
+			
 		ID3D11DeviceContext* ctx = NULL;
 		ID3D11Texture2D* d3dtex0 = (ID3D11Texture2D*)texY;
 		ID3D11Texture2D* d3dtex1 = (ID3D11Texture2D*)texU;
 		ID3D11Texture2D* d3dtex2 = (ID3D11Texture2D*)texV;
-		uint8_t* yptr = NULL;
-		uint8_t* uptr = NULL;
-		uint8_t* vptr = NULL;
-		uint8_t* audio = NULL;
-		int framesize = 0;
-
-		//	2.Get thumbnail data and update texture
-		avhandler->setSeekTime(targetTime);
-		do {
-			avhandler->getVideoFrame(&yptr, &uptr, &vptr);
-			avhandler->getAudioFrame(&audio, framesize);
-		} while (yptr == NULL);
-
+			
 		g_D3D11Device->GetImmediateContext(&ctx);
 		ctx->UpdateSubresource(d3dtex0, 0, NULL, yptr, width, 0);
 		ctx->UpdateSubresource(d3dtex1, 0, NULL, uptr, width / 2, 0);
 		ctx->UpdateSubresource(d3dtex2, 0, NULL, vptr, width / 2, 0);
 		ctx->Release();
-
-		//	3.Release related resources
-		delete (iter->avhandler);
-		iter->avhandler = NULL;
-		iter->progressTime = 0.0f;
-		iter->lastUpdateTime = 0.0f;
-	}
+	});
 }
 
 int nativeGetMetaData(const char* filePath, char*** key, char*** value) {
@@ -432,8 +450,38 @@ int nativeGetMetaData(const char* filePath, char*** key, char*** value) {
 }
 
 bool nativeIsContentReady(int id) {
-	VideoContextIter iter = getVideoContextIter(id);
-	return (iter != videoContexts.end() && iter->isContentReady);
+	VideoContextIter iter;
+	if (!getVideoContextIter(id, &iter)) { return false; }
+
+	return iter->isContentReady;
+}
+
+void nativeSetVideoEnable(int id, bool isEnable) {
+	VideoContextIter iter;
+	if (!getVideoContextIter(id, &iter)) { return; }
+
+	iter->avhandler->setVideoEnable(isEnable);
+}
+
+void nativeSetAudioEnable(int id, bool isEnable) {
+	VideoContextIter iter;
+	if (!getVideoContextIter(id, &iter)) { return; }
+
+	iter->avhandler->setAudioEnable(isEnable);
+}
+
+void nativeSetAudioAllChDataEnable(int id, bool isEnable) {
+	VideoContextIter iter;
+	if (!getVideoContextIter(id, &iter)) { return; }
+
+	iter->avhandler->setAudioAllChDataEnable(isEnable);
+}
+
+bool nativeIsEOF(int id) {
+	VideoContextIter iter;
+	if (!getVideoContextIter(id, &iter) || iter->avhandler == NULL) { return true; }
+
+	return iter->avhandler->getDecoderState() == AVHandler::DecoderState::DECODE_EOF;
 }
 
 //extern "C" EXPORT_API void nativeGetTextureType(void* ptr0) {

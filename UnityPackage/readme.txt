@@ -1,16 +1,35 @@
-﻿MediaDecoder for Unity - v1.0.1
+﻿MediaDecoder for Unity - v1.0.7
 
 Quick start:
-0.	Download the FFmpeg 3.0.1 Win64 Shared from https://ffmpeg.zeranoe.com/blog/?p=499#more-499
-1.	Put the following dlls to project folder(the same directory with Assets or beside *.exe)
+0.	Download the FFmpeg 64 bits from http://dl4.htc.com/vive/ViveHomeSDK/FFmpeg-64bits.zip
+	If your Unity editor is 32 bits, you can download the FFmpeg official build from https://ffmpeg.zeranoe.com/builds/
+	Please notice that the license of FFmpeg official build is GPL and https is not default enabled.
+1.	Put the following dlls to project folder(ex. If your project is at D:\SampleProject\,
+												 you can put the dlls to D:\SampleProject\, C:\Program Files\Unity\Editor or beside *.exe)
 	- avcodec-57.dll
 	- avformat-57.dll
 	- avutil-55.dll
 	- swresample-2.dll
+	- libeay32.dll
 2.	Create a model with MeshRenderer(ex.Quad) and attach MediaDecoder.cs as component.
-3.	Set MeshRenderer’s Material to YUV2RGBA and make sure the shader to be YUV2RGBA.
+3.	Set MeshRenderer’s Material to YUV2RGBA and make sure the shader to be YUV2RGBA.(YUV2RGBA_linear is for linear color space)
 4.	Fill in video path(ex. D:\_Video\sample.mp4) and enable Play On Awake.
 5.	Click play, now you should be able to see the video playing on the model.
+6.	If dll not found, check the followings:
+	- In editor mode:
+		* Make sure your Unity editor and FFmpeg dlls are consistent with either 32 bits or 64 bits.
+		* Make sure FFmpeg dlls are placed in correct position.
+		Ex. If your project is located in D:\Sample\, the following directories should work:
+		D:\Sample\
+		C:\Program Files\Unity\Editor\
+		Other system path in environment variables.
+	- Standalone build:
+		* Make sure your build settings and FFmpeg dlls are consistent with either 32 bits or 64 bits.
+		* Remember to copy FFmpeg dlls to the directory where the build can find.
+		Ex. If your project is built to D:\Build\SampleApp.exe, the following directories should work:
+		D:\Build\
+		Assign library loading path in your project.(please refer to Environment.SetEnvironmentVariable)
+		Other system path in environment variables.
 
 Requirements:
 - The plugin currently only supports Windows / DX11.
@@ -19,17 +38,24 @@ API lists:
 - bool isVideoEnabled:
 	(Read only) Video is enabled or not. This value is available after initialization.
 
-- bool isAudioEnabled
+- bool isAudioEnabled:
 	(Read only) Audio is enabled or not. This value is available after initialization.
 
-- float videoTotalTime
+- float videoTotalTime:
 	(Read only) Video duration. This value is available after initialization.
 
-- float audioTotalTime
+- float audioTotalTime:
 	(Read only) Audio duration. This value is available after initialization.
+	
+- int audioFrequency:
+	(Read only) Audio sample rate. This value is available after initialization.
 
-- void initDecoder(string path):
+- int audioChannels:
+	(Read only) Audio sample rate. This value is available after initialization.
+
+- void initDecoder(string path, bool enableAllAudioCh = false):
 	Start a asynchronized initialization coroutine. onInitComplete event would be invoked when initialization was done.
+	Set enableAllAudioCh to true if you want to process all audio channels by yourself. In this case, the audio would not be play by default.
 
 - void startDecoding():
 	Start native decoding. It only works for initialized state.
@@ -40,11 +66,23 @@ API lists:
 - void stopDecoding():
 	Stop native decoding process. It would be called at OnApplicationQuit and OnDestroy.
 
+- void setVideoEnable(bool isEnable):
+    Enable/disable video decoding. 
+	
+- void setAudioEnable(bool isEnable):
+	Enable/disable audio decoding. 
+	
+- void getAllAudioChannelData(out float[] data, out double time, out int samplesPerChannel):
+	Get all audio channels. This API could only be used when the flag enableAllAudioCh is true while initialization.
+	
 - void setSeekTime(float seekTime):
 	Seek video to given time. Seek to time zero if seekTime over video duration.
 	
 - bool isSeeking():
 	Return true if decoder is processing seek.
+
+- bool isVideoEOF():
+	Return true if decoder is reach end of file.
 	
 - void setStepForward(float sec):
 	Seek based on current time. It is equivalent to setSeekTime(currentTime + sec).
@@ -82,6 +120,10 @@ API lists:
 - static void getMetaData(string filePath, out string[] key, out string[] value):
 	Get all meta data key-value pairs.
 	
+- static void loadVideoThumb(GameObject obj, string filePath, float time):
+	Load video thumbnail of given time. This API is synchronized so that it may block main thread.
+	You can use normal decoding process to leverage the asynchronized decoding.
+	
 Tools and sample implement:
 - UVSphere.cs:
 	Generate custom resolution UV-Sphere. It is useful for 360 video player.
@@ -106,6 +148,9 @@ Tools and sample implement:
 	
 - StereoImageSourceController.cs:
 	Stereo version of ImageSourceController.
+	
+- config:
+	Decoder config. If you want to adjust buffer size or use TCP for RTSP, put it to the directory that can be found.
 
 Scenes:
 - SampleScene.unity:
@@ -113,4 +158,36 @@ Scenes:
 
 - Demo:
 	Demo some use cases which include video, stereo video, image, stereo image and 360 video.
-	This demo has dependency with SteamVR plugin.
+	Please follow the steps below to make it work properly:
+	1. Add two layers named LeftEye and RightEye.
+	2. Found the objects named begining with "Stereo", set it's children's layer to LeftEye and RightEye.
+	3. Set the Camera (left eye)'s Target Eye to Left, Culling Mask to uncheck RightEye.
+	4. Set the Camera (right eye)'s Target Eye to Right, Culling Mask to uncheck LeftEye.
+	5. Modify the directory of each demo to your own path and click play.
+
+Change for v1.0.7:
+- Add native config file for buffer size control, use TCP if streaming through RTSP.	
+- Fix RTSP playing fail.
+
+Changes for v1.0.6:
+- Fix buffering issue.
+
+Changes for v1.0.5:
+- Fix the dll loading issue for 32-bits Unity editor.
+- Fix the occasionally crash when call seek function.
+- Fix the issue that onVideoEnd event is not invoked correctly.
+- Add EOF decoder state and API.
+- Add API to get all audio channels.
+- Add thumbnail loading API.
+- Improve seek performance.
+- Set the index of FileSeeker to public(read only) and modify API toPrev and toNext to return index.
+
+Changes for v1.0.4:
+- Add API for video/audio enable/disable decoding.
+
+Changes for v1.0.3:
+- Add a shader for linear color space.
+- Modify the sample scene for Unity 5.4.
+
+Changes for v1.0.2:
+- Support streaming through https.

@@ -3,7 +3,7 @@
 
 typedef enum UnityGfxRenderer
 {
-	kUnityGfxRendererOpenGL            =  0, // Desktop OpenGL 2 (deprecated)
+	kUnityGfxRendererOpenGL            =  0, // Legacy OpenGL
 	kUnityGfxRendererD3D9              =  1, // Direct3D 9
 	kUnityGfxRendererD3D11             =  2, // Direct3D 11
 	kUnityGfxRendererGCM               =  3, // PlayStation 3
@@ -15,7 +15,7 @@ typedef enum UnityGfxRenderer
 	kUnityGfxRendererPS4               = 13, // PlayStation 4
 	kUnityGfxRendererXboxOne           = 14, // Xbox One        
 	kUnityGfxRendererMetal             = 16, // iOS Metal
-	kUnityGfxRendererOpenGLCore        = 17, // Desktop OpenGL core
+	kUnityGfxRendererOpenGLCore        = 17, // OpenGL core
 	kUnityGfxRendererD3D12             = 18, // Direct3D 12
 } UnityGfxRenderer;
 

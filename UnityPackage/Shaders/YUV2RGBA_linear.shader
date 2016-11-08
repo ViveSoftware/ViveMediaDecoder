@@ -1,6 +1,6 @@
 ﻿//========= Copyright 2015-2016, HTC Corporation. All rights reserved. ===========
 
-Shader "Unlit/YUV2RGBA"
+Shader "Unlit/YUV2RGBA_linear"
 {
 	Properties
 	{

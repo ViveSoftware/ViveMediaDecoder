@@ -18,6 +18,7 @@
 #endif
 
 extern "C" {
+	//	Decoder
 	__declspec(dllexport) int nativeCreateDecoder(const char* filePath, int& id);
 	__declspec(dllexport) int nativeCreateDecoderAsync(const char* filePath, int& id);
 	__declspec(dllexport) int nativeGetDecoderState(int id);
@@ -26,22 +27,24 @@ extern "C" {
 	__declspec(dllexport) void nativeDestroyDecoder(int id);
 	__declspec(dllexport) bool nativeIsBufferFull(int id);
 	__declspec(dllexport) bool nativeIsBufferEmpty(int id);
+	__declspec(dllexport) bool nativeIsEOF(int id);
 	//	Video
 	__declspec(dllexport) bool nativeIsVideoEnabled(int id);
+	__declspec(dllexport) void nativeSetVideoEnable(int id, bool isEnable);
 	__declspec(dllexport) void nativeGetVideoFormat(int id, int& width, int& height, float& totalTime);
 	__declspec(dllexport) void nativeSetVideoTime(int id, float currentTime);
 	__declspec(dllexport) bool nativeIsContentReady(int id);
 	//	Audio
 	__declspec(dllexport) bool nativeIsAudioEnabled(int id);
-	__declspec(dllexport) void nativeEnableAudioDecode(int id, bool isEnable);
+	__declspec(dllexport) void nativeSetAudioEnable(int id, bool isEnable);
+	__declspec(dllexport) void nativeSetAudioAllChDataEnable(int id, bool isEnable);
 	__declspec(dllexport) void nativeGetAudioFormat(int id, int& channel, int& frequency, float& totalTime);
 	__declspec(dllexport) float nativeGetAudioData(int id, unsigned char** audioData, int& frameSize);
 	__declspec(dllexport) void nativeFreeAudioData(int id);
-	__declspec(dllexport) float nativeGetAudioCurrentTime(int id);
 	//	Seek
 	__declspec(dllexport) void nativeSetSeekTime(int id, float sec);
 	__declspec(dllexport) bool nativeIsSeekOver(int id);
-
+	//  Utility
 	__declspec(dllexport) int nativeGetMetaData(const char* filePath, char*** key, char*** value);
-	__declspec(dllexport) void nativeUpdateThumbnail(int id, void* texY, void* texU, void* texV, float time);
+	__declspec(dllexport) void nativeLoadThumbnail(int id, float time, void* texY, void* texU, void* texV);
 }
