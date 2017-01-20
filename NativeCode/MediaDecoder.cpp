@@ -1,4 +1,4 @@
-﻿//========= Copyright 2015-2016, HTC Corporation. All rights reserved. ===========
+﻿//========= Copyright 2015-2017, HTC Corporation. All rights reserved. ===========
 
 #include "Unity\IUnityGraphics.h"
 #include "MediaDecoder.h"
@@ -138,9 +138,7 @@ void DoRendering (int id)
 					uint8_t* ptrU = NULL;
 					uint8_t* ptrV = NULL;
 					double curFrameTime = localAVHandler->getVideoFrame(&ptrY, &ptrU, &ptrV);
-					LOG("getVideoFrame Yptr = %p \n", ptrY);
 					if (ptrY != NULL && curFrameTime != -1 && localVideoContext->lastUpdateTime != curFrameTime) {
-						LOG("texture upload \n");
 						localVideoContext->textureObj->upload(ptrY, ptrU, ptrV);
 						localVideoContext->lastUpdateTime = (float)curFrameTime;
 						localVideoContext->isContentReady = true;
@@ -369,18 +367,18 @@ bool nativeIsSeekOver(int id) {
 	return !(iter->avhandler->getDecoderState() == AVHandler::DecoderState::SEEK);
 }
 
-bool nativeIsBufferFull(int id) {
+bool nativeIsVideoBufferFull(int id) {
 	VideoContextIter iter;
 	if (!getVideoContextIter(id, &iter)) { return false; }
 
-	return iter->avhandler->isBufferFull();
+	return iter->avhandler->isVideoBufferFull();
 }
 
-bool nativeIsBufferEmpty(int id) {
+bool nativeIsVideoBufferEmpty(int id) {
 	VideoContextIter iter;
 	if (!getVideoContextIter(id, &iter)) { return false; }
 	
-	return iter->avhandler->isBufferEmpty();
+	return iter->avhandler->isVideoBufferEmpty();
 }
 
 /*	This function is for thumbnail extraction.*/

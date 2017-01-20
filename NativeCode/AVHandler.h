@@ -1,4 +1,4 @@
-//========= Copyright 2015-2016, HTC Corporation. All rights reserved. ===========
+//========= Copyright 2015-2017, HTC Corporation. All rights reserved. ===========
 
 #pragma once
 #include "IDecoder.h"
@@ -30,8 +30,8 @@ public:
 
 	IDecoder::VideoInfo getVideoInfo();
 	IDecoder::AudioInfo getAudioInfo();
-	bool isBufferEmpty();
-	bool isBufferFull();
+	bool isVideoBufferEmpty();
+	bool isVideoBufferFull();
 
 	int getMetaData(char**& key, char**& value);
 

@@ -1,5 +1,5 @@
-﻿MediaDecoder for Unity - v1.0.7
-Copyright 2015-2016 HTC Corporation. All Rights Reserved.
+﻿MediaDecoder for Unity - v1.1.0
+Copyright 2015-2017 HTC Corporation. All Rights Reserved.
 
 The works ("Work") refer to this software provided by HTC Corporation ("HTC") and published in Unity Store. 
 This Work distributed from Unity Store is licensed under the Asset Store End User License Agreement (Asset Store EULA). 

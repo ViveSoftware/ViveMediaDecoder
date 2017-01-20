@@ -1,4 +1,4 @@
-//========= Copyright 2015-2016, HTC Corporation. All rights reserved. ===========
+//========= Copyright 2015-2017, HTC Corporation. All rights reserved. ===========
 
 #include "AVHandler.h"
 #include "DecoderFFmpeg.h"
@@ -88,11 +88,18 @@ void AVHandler::startDecoding() {
 
 		mDecoderState = DECODING;
 		while (mDecoderState != STOP) {
-			if (mDecoderState == SEEK) {
+			switch (mDecoderState) {
+			case DECODING:
+				if (!mIDecoder->decode()) {
+					mDecoderState = DECODE_EOF;
+				}
+				break;
+			case SEEK:
 				mIDecoder->seek(mSeekTime);
 				mDecoderState = DECODING;
-			} else if (mDecoderState != DECODE_EOF && !mIDecoder->decode()) {
-				mDecoderState = DECODE_EOF;
+				break;
+			case DECODE_EOF:
+				break;
 			}
 		}
 	});
@@ -120,18 +127,16 @@ IDecoder::AudioInfo AVHandler::getAudioInfo() {
 	return mIDecoder->getAudioInfo();
 }
 
-bool AVHandler::isBufferEmpty() {
+bool AVHandler::isVideoBufferEmpty() {
 	IDecoder::VideoInfo* videoInfo = &(mIDecoder->getVideoInfo());
-	IDecoder::AudioInfo* audioInfo = &(mIDecoder->getAudioInfo());
 	IDecoder::BufferState EMPTY = IDecoder::BufferState::EMPTY;
-	return (videoInfo->isEnabled && videoInfo->bufferState == EMPTY) || (audioInfo->isEnabled && audioInfo->bufferState == EMPTY);
+	return videoInfo->isEnabled && videoInfo->bufferState == EMPTY;
 }
 
-bool AVHandler::isBufferFull() {
+bool AVHandler::isVideoBufferFull() {
 	IDecoder::VideoInfo* videoInfo = &(mIDecoder->getVideoInfo());
-	IDecoder::AudioInfo* audioInfo = &(mIDecoder->getAudioInfo());
 	IDecoder::BufferState FULL = IDecoder::BufferState::FULL;
-	return (videoInfo->isEnabled && videoInfo->bufferState == FULL) || (audioInfo->isEnabled && audioInfo->bufferState == FULL);
+	return videoInfo->isEnabled && videoInfo->bufferState == FULL;
 }
 
 int AVHandler::getMetaData(char**& key, char**& value) {

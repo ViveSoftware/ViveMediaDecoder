@@ -1,4 +1,4 @@
-//========= Copyright 2015-2016, HTC Corporation. All rights reserved. ===========
+//========= Copyright 2015-2017, HTC Corporation. All rights reserved. ===========
 
 #pragma once
 #include "IDecoder.h"
@@ -49,8 +49,8 @@ private:
 	AVPacket	mPacket;
 	std::list<AVFrame*> mVideoFrames;
 	std::list<AVFrame*> mAudioFrames;
-	unsigned int mBuffMax;
-	unsigned int mBuffMin;
+	unsigned int mVideoBuffMax;
+	unsigned int mAudioBuffMax;
 
 	SwrContext*	mSwrContext;
 	int initSwrContext();
@@ -64,9 +64,12 @@ private:
 	bool isBuffBlocked();
 	void updateVideoFrame();
 	void updateAudioFrame();
-	void freeFrontFrame(std::list<AVFrame*>* frameBuff);
-	void flushBuffer(std::list<AVFrame*>* frameBuff);
-	std::mutex mMutex;
+	void freeFrontFrame(std::list<AVFrame*>* frameBuff, std::mutex* mutex);
+	void flushBuffer(std::list<AVFrame*>* frameBuff, std::mutex* mutex);
+	std::mutex mVideoMutex;
+	std::mutex mAudioMutex;
+	
+	bool mIsSeekToAny;
 
 	int loadConfig();
 	void printErrorMsg(int errorCode);

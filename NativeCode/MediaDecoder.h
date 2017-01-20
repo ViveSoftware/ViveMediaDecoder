@@ -1,4 +1,4 @@
-//========= Copyright 2015-2016, HTC Corporation. All rights reserved. ===========
+//========= Copyright 2015-2017, HTC Corporation. All rights reserved. ===========
 
 #pragma once
 
@@ -25,8 +25,6 @@ extern "C" {
 	__declspec(dllexport) void nativeCreateTexture(int id, void*& tex0, void*& tex1, void*& tex2);
 	__declspec(dllexport) bool nativeStartDecoding(int id);
 	__declspec(dllexport) void nativeDestroyDecoder(int id);
-	__declspec(dllexport) bool nativeIsBufferFull(int id);
-	__declspec(dllexport) bool nativeIsBufferEmpty(int id);
 	__declspec(dllexport) bool nativeIsEOF(int id);
 	//	Video
 	__declspec(dllexport) bool nativeIsVideoEnabled(int id);
@@ -34,6 +32,8 @@ extern "C" {
 	__declspec(dllexport) void nativeGetVideoFormat(int id, int& width, int& height, float& totalTime);
 	__declspec(dllexport) void nativeSetVideoTime(int id, float currentTime);
 	__declspec(dllexport) bool nativeIsContentReady(int id);
+	__declspec(dllexport) bool nativeIsVideoBufferFull(int id);
+	__declspec(dllexport) bool nativeIsVideoBufferEmpty(int id);
 	//	Audio
 	__declspec(dllexport) bool nativeIsAudioEnabled(int id);
 	__declspec(dllexport) void nativeSetAudioEnable(int id, bool isEnable);

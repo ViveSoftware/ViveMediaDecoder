@@ -1,4 +1,4 @@
-﻿MediaDecoder for Unity - v1.0.7
+﻿MediaDecoder for Unity - v1.1.0
 
 Quick start:
 0.	Download the FFmpeg 64 bits from http://dl4.htc.com/vive/ViveHomeSDK/FFmpeg-64bits.zip
@@ -21,6 +21,7 @@ Quick start:
 		* Make sure FFmpeg dlls are placed in correct position.
 		Ex. If your project is located in D:\Sample\, the following directories should work:
 		D:\Sample\
+		D:\Sample\Assets\MediaDecoder\Plugins\x86_64\ or D:\Sample\Assets\MediaDecoder\Plugins\x86\
 		C:\Program Files\Unity\Editor\
 		Other system path in environment variables.
 	- Standalone build:
@@ -150,7 +151,8 @@ Tools and sample implement:
 	Stereo version of ImageSourceController.
 	
 - config:
-	Decoder config. If you want to adjust buffer size or use TCP for RTSP, put it to the directory that can be found.
+	Decoder config. If you want to adjust buffer size or use TCP for RTSP, put it to the directory that can be found(the same with FFmpeg).
+	Use default settings if there is no config.
 
 Scenes:
 - SampleScene.unity:
@@ -165,6 +167,11 @@ Scenes:
 	4. Set the Camera (right eye)'s Target Eye to Right, Culling Mask to uncheck LeftEye.
 	5. Modify the directory of each demo to your own path and click play.
 
+Change for v1.1.0:
+- Modify native buffer management.
+- Modify audio play process for lower scheduling delay.
+- Open native config for seek function and buffer settings.
+	
 Change for v1.0.7:
 - Add native config file for buffer size control, use TCP if streaming through RTSP.	
 - Fix RTSP playing fail.

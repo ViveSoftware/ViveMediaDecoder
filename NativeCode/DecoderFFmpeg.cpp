@@ -1,4 +1,4 @@
-//========= Copyright 2015-2016, HTC Corporation. All rights reserved. ===========
+//========= Copyright 2015-2017, HTC Corporation. All rights reserved. ===========
 
 #include "DecoderFFmpeg.h"
 #include "Logger.h"
@@ -46,6 +46,7 @@
 *	2016.11.03 Fix seek occasionally crash. Root cause: multi-thread race condition to operate buffer.
 *	2016.11.04 Fix performance issue that lock_guard too much.
 *	2016.11.16 Add native config file loading.
+*	2017.01.17 Separate video/audio buffer and mutex.
 */
 
 DecoderFFmpeg::DecoderFFmpeg() {
@@ -60,14 +61,15 @@ DecoderFFmpeg::DecoderFFmpeg() {
 
 	mSwrContext = NULL;
 
-	mBuffMax = 128;
-	mBuffMin = 64;
+	mVideoBuffMax = 64;
+	mAudioBuffMax = 128;
 
 	memset(&mVideoInfo, 0, sizeof(VideoInfo));
 	memset(&mAudioInfo, 0, sizeof(AudioInfo));
 	mIsInitialized = false;
 	mIsAudioAllChEnabled = false;
 	mUseTCP = false;
+	mIsSeekToAny = false;
 }
 
 DecoderFFmpeg::~DecoderFFmpeg() {
@@ -96,9 +98,10 @@ bool DecoderFFmpeg::init(const char* filePath) {
 	if (errorCode < 0) {
 		LOG("config loading error. \n");
 		LOG("Use default settings. \n");
-		mBuffMax = 128;
-		mBuffMin = 64;
+		mVideoBuffMax = 64;
+		mAudioBuffMax = 128;
 		mUseTCP = false;
+		mIsSeekToAny = false;
 	}
 
 	AVDictionary* opts = NULL;
@@ -289,7 +292,7 @@ int DecoderFFmpeg::initSwrContext() {
 }
 
 double DecoderFFmpeg::getVideoFrame(unsigned char** outputY, unsigned char** outputU, unsigned char** outputV) {
-	std::lock_guard<std::mutex> lock(mMutex);
+	std::lock_guard<std::mutex> lock(mVideoMutex);
 	
 	if (!mIsInitialized || mVideoFrames.size() == 0) {
 		LOG("Video frame not available. \n");
@@ -310,7 +313,7 @@ double DecoderFFmpeg::getVideoFrame(unsigned char** outputY, unsigned char** out
 }
 
 double DecoderFFmpeg::getAudioFrame(unsigned char** outputFrame, int& frameSize) {
-	std::lock_guard<std::mutex> lock(mMutex);
+	std::lock_guard<std::mutex> lock(mAudioMutex);
 	if (!mIsInitialized || mAudioFrames.size() == 0) {
 		LOG("Audio frame not available. \n");
 		*outputFrame = NULL;
@@ -335,7 +338,7 @@ void DecoderFFmpeg::seek(double time) {
 
 	uint64_t timeStamp = (uint64_t) time * AV_TIME_BASE;
 
-	if (0 > av_seek_frame(mAVFormatContext, -1, timeStamp, AVSEEK_FLAG_BACKWARD)) {
+	if (0 > av_seek_frame(mAVFormatContext, -1, timeStamp, mIsSeekToAny ? AVSEEK_FLAG_ANY : AVSEEK_FLAG_BACKWARD)) {
 		LOG("Seek time fail.\n");
 		return;
 	}
@@ -344,7 +347,7 @@ void DecoderFFmpeg::seek(double time) {
 		if (mVideoCodecContext != NULL) {
 			avcodec_flush_buffers(mVideoCodecContext);
 		}
-		flushBuffer(&mVideoFrames);
+		flushBuffer(&mVideoFrames, &mVideoMutex);
 		mVideoInfo.lastTime = -1;
 	}
 	
@@ -352,7 +355,7 @@ void DecoderFFmpeg::seek(double time) {
 		if (mAudioCodecContext != NULL) {
 			avcodec_flush_buffers(mAudioCodecContext);
 		}
-		flushBuffer(&mAudioFrames);
+		flushBuffer(&mAudioFrames, &mAudioMutex);
 		mAudioInfo.lastTime = -1;
 	}
 }
@@ -400,8 +403,8 @@ void DecoderFFmpeg::destroy() {
 		mSwrContext = NULL;
 	}
 	
-	flushBuffer(&mVideoFrames);
-	flushBuffer(&mAudioFrames);
+	flushBuffer(&mVideoFrames, &mVideoMutex);
+	flushBuffer(&mAudioFrames, &mAudioMutex);
 	
 	mVideoCodec = NULL;
 	mAudioCodec = NULL;
@@ -415,23 +418,20 @@ void DecoderFFmpeg::destroy() {
 	
 	mIsInitialized = false;
 	mIsAudioAllChEnabled = false;
-	mBuffMax = 128;
-	mBuffMin = 64;
+	mVideoBuffMax = 64;
+	mAudioBuffMax = 128;
 	mUseTCP = false;
+	mIsSeekToAny = false;
 }
 
 bool DecoderFFmpeg::isBuffBlocked() {
-	bool ret = true;
-	if (mVideoInfo.isEnabled && mAudioInfo.isEnabled) {
-		if (mVideoFrames.size() <= mBuffMin || mAudioFrames.size() <= mBuffMin || (mVideoFrames.size() <= mBuffMax && mAudioFrames.size() <= mBuffMax)) {
-			ret = false;
-		}
-	} else {
-		if (mVideoInfo.isEnabled) {
-			ret = !(mVideoFrames.size() <= mBuffMax);
-		} else if (mAudioInfo.isEnabled) {
-			ret = !(mAudioFrames.size() <= mBuffMax);
-		}
+	bool ret = false;
+	if (mVideoInfo.isEnabled && mVideoFrames.size() >= mVideoBuffMax) {
+		ret = true;
+	}
+
+	if (mAudioInfo.isEnabled && mAudioFrames.size() >= mAudioBuffMax) {
+		ret = true;
 	}
 
 	return ret;
@@ -440,12 +440,17 @@ bool DecoderFFmpeg::isBuffBlocked() {
 void DecoderFFmpeg::updateVideoFrame() {
 	int isFrameAvailable = 0;
 	AVFrame* frame = av_frame_alloc();
+	clock_t start = clock();
 	if (avcodec_decode_video2(mVideoCodecContext, frame, &isFrameAvailable, &mPacket) < 0) {
 		LOG("Error processing data. \n");
 		return;
 	}
+	LOG("updateVideoFrame = %f\n", (float)(clock() - start) / CLOCKS_PER_SEC);
 
-	mVideoFrames.push_back(frame);
+	if (isFrameAvailable) {
+		std::lock_guard<std::mutex> lock(mVideoMutex);
+		mVideoFrames.push_back(frame);
+	}
 }
 
 void DecoderFFmpeg::updateAudioFrame() {
@@ -463,20 +468,21 @@ void DecoderFFmpeg::updateAudioFrame() {
 	frame->best_effort_timestamp = frameDecoded->best_effort_timestamp;
 	swr_convert_frame(mSwrContext, frame, frameDecoded);
 
+	std::lock_guard<std::mutex> lock(mAudioMutex);
 	mAudioFrames.push_back(frame);
 	av_frame_free(&frameDecoded);
 }
 
 void DecoderFFmpeg::freeVideoFrame() {
-	freeFrontFrame(&mVideoFrames);
+	freeFrontFrame(&mVideoFrames, &mVideoMutex);
 }
 
 void DecoderFFmpeg::freeAudioFrame() {
-	freeFrontFrame(&mAudioFrames);
+	freeFrontFrame(&mAudioFrames, &mAudioMutex);
 }
 
-void DecoderFFmpeg::freeFrontFrame(std::list<AVFrame*>* frameBuff) {
-	std::lock_guard<std::mutex> lock(mMutex);
+void DecoderFFmpeg::freeFrontFrame(std::list<AVFrame*>* frameBuff, std::mutex* mutex) {
+	std::lock_guard<std::mutex> lock(*mutex);
 	if (!mIsInitialized || frameBuff->size() == 0) {
 		LOG("Not initialized or buffer empty. \n");
 		return;
@@ -489,8 +495,8 @@ void DecoderFFmpeg::freeFrontFrame(std::list<AVFrame*>* frameBuff) {
 }
 
 //	frameBuff.clear would only clean the pointer rather than whole resources. So we need to clear frameBuff by ourself.
-void DecoderFFmpeg::flushBuffer(std::list<AVFrame*>* frameBuff) {
-	std::lock_guard<std::mutex> lock(mMutex);
+void DecoderFFmpeg::flushBuffer(std::list<AVFrame*>* frameBuff, std::mutex* mutex) {
+	std::lock_guard<std::mutex> lock(*mutex);
 	while (!frameBuff->empty()) {
 		av_frame_free(&(frameBuff->front()));
 		frameBuff->pop_front();
@@ -500,7 +506,7 @@ void DecoderFFmpeg::flushBuffer(std::list<AVFrame*>* frameBuff) {
 //	Record buffer state either FULL or EMPTY. It would be considered by MediaDecoder.cs for buffering judgement.
 void DecoderFFmpeg::updateBufferState() {
 	if (mVideoInfo.isEnabled) {
-		if (mVideoFrames.size() >= mBuffMax) {
+		if (mVideoFrames.size() >= mVideoBuffMax) {
 			mVideoInfo.bufferState = BufferState::FULL;
 		} else if(mVideoFrames.size() == 0) {
 			mVideoInfo.bufferState = BufferState::EMPTY;
@@ -510,7 +516,7 @@ void DecoderFFmpeg::updateBufferState() {
 	}
 
 	if (mAudioInfo.isEnabled) {
-		if (mAudioFrames.size() >= mBuffMax) {
+		if (mAudioFrames.size() >= mAudioBuffMax) {
 			mAudioInfo.bufferState = BufferState::FULL;
 		} else if (mAudioFrames.size() == 0) {
 			mAudioInfo.bufferState = BufferState::EMPTY;
@@ -528,40 +534,32 @@ int DecoderFFmpeg::loadConfig() {
 	}
 
 	enum CONFIG { NONE, USE_TCP, BUFF_MIN, BUFF_MAX };
-	int buffMin = 0, buffMax = 0, tcp = 0;
+	int buffVideoMax = 0, buffAudioMax = 0, tcp = 0, seekAny = 0;
 	std::string line;
 	while (configFile >> line) {
 		std::string token = line.substr(0, line.find("="));
 		CONFIG config = NONE;
-		if (token == "USE_TCP") { config = USE_TCP; }
-		else if (token == "BUFF_MIN") { config = BUFF_MIN; }
-		else if (token == "BUFF_MAX") { config = BUFF_MAX; }
-
 		std::string value = line.substr(line.find("=") + 1);
 		try {
-			switch (config) {
-			case USE_TCP:
-				tcp = stoi(value);
-				break;
-			case BUFF_MIN:
-				buffMin = stoi(value);
-				break;
-			case BUFF_MAX:
-				buffMax = stoi(value);
-				break;
-			}
+			if (token == "USE_TCP") { tcp = stoi(value); }
+			else if (token == "BUFF_VIDEO_MAX") { buffVideoMax = stoi(value); }
+			else if (token == "BUFF_AUDIO_MAX") { buffAudioMax = stoi(value); }
+			else if (token == "SEEK_ANY") { seekAny = stoi(value); }
+		
 		} catch (...) {
 			return -1;
 		}
 	}
 
 	mUseTCP = tcp != 0;
-	mBuffMin = buffMin;
-	mBuffMax = buffMax;
+	mVideoBuffMax = buffVideoMax;
+	mAudioBuffMax = buffAudioMax;
+	mIsSeekToAny = seekAny != 0;
 	LOG("config loading success.\n");
-	LOG("USE_TCP=%b\n", mUseTCP);
-	LOG("BUFF_MIN=%d\n", mBuffMin);
-	LOG("BUFF_MAX=%d\n", mBuffMax);
+	LOG("USE_TCP=%s\n", mUseTCP ? "true" : "false");
+	LOG("BUFF_VIDEO_MAX=%d\n", mVideoBuffMax);
+	LOG("BUFF_AUDIO_MAX=%d\n", mAudioBuffMax);
+	LOG("SEEK_ANY=%s\n", mIsSeekToAny ? "true" : "false");
 
 	return 0;
 }
