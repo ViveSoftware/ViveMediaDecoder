@@ -96,7 +96,7 @@ namespace HTC.UnityPlugin.Multimedia
         [DllImport (NATIVE_LIBRARY_NAME)]
 		private static extern IntPtr GetRenderEventFunc();
 
-        private const string VERSION = "1.1.0.170117";
+        private const string VERSION = "1.1.1.170217";
 		public bool playOnAwake = false;
 		public string mediaPath = null;	            //	Assigned outside.
 		public UnityEvent onInitComplete = null;    //  Initialization is asynchronized. Invoked after initialization.
@@ -355,7 +355,7 @@ namespace HTC.UnityPlugin.Multimedia
 
             audioDataBuff = new List<float>();
             while (decoderState >= DecoderState.START) {
-                if (decoderState != DecoderState.PAUSE) {
+                if (decoderState != DecoderState.SEEK_FRAME) {
                     double audioNativeTime = nativeGetAudioData(decoderID, ref dataPtr, ref audioFrameLength);
                     if (0 < audioNativeTime && lastTime != audioNativeTime && decoderState != DecoderState.SEEK_FRAME && audioFrameLength != 0) {
                         if (firstAudioFrameTime == -1.0) {
@@ -378,7 +378,7 @@ namespace HTC.UnityPlugin.Multimedia
                         nativeFreeAudioData(decoderID);
                     }
 
-                    System.Threading.Thread.Sleep(5);
+                    System.Threading.Thread.Sleep(2);
                 }
             }
             
@@ -461,7 +461,7 @@ namespace HTC.UnityPlugin.Multimedia
 
             audioProgressTime = -1.0;           //  Used to schedule each audio clip to be played.
 			while(decoderState >= DecoderState.START) {
-				if(decoderState != DecoderState.PAUSE && decoderState != DecoderState.BUFFERING) {
+				if(decoderState == DecoderState.START) {
 					double currentTime = AudioSettings.dspTime - globalStartTime;
 					if(currentTime < audioTotalTime || audioTotalTime == -1.0f) {
                         if (audioDataBuff != null && audioDataBuff.Count >= audioDataLength) {
@@ -564,8 +564,10 @@ namespace HTC.UnityPlugin.Multimedia
                 nativeSetVideoTime(decoderID, (float) setTime);
 
                 if (isAudioEnabled) {
+                    lock (_lock) {
                     audioDataBuff.Clear();
-                    audioProgressTime = -1.0;
+                    }
+                    audioProgressTime = firstAudioFrameTime = -1.0;
                     foreach (AudioSource src in audioSource) {
                         src.Stop();
                     }
