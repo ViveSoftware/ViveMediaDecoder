@@ -136,6 +136,8 @@ bool DecoderFFmpeg::init(const char* filePath) {
 		mVideoStream = mAVFormatContext->streams[videoStreamIndex];
 		mVideoCodecContext = mVideoStream->codec;
 		mVideoCodecContext->refcounted_frames = 1;
+		mVideoCodecContext->thread_count = 4;
+		mVideoCodecContext->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
 		mVideoCodec = avcodec_find_decoder(mVideoCodecContext->codec_id);
 		
 		if (mVideoCodec == NULL) {
