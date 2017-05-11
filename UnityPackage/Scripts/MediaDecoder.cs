@@ -138,7 +138,7 @@ namespace HTC.UnityPlugin.Multimedia
 		private List<float> audioDataBuff = null;   //  Buffer to keep audio data decoded from native.
 		public int audioFrequency { get; private set; }
         public int audioChannels { get; private set; }
-        private const double OVERLAP_TIME = 0.01;   //  Our audio clip is defined as: [overlay][audio data][overlap].
+        private const double OVERLAP_TIME = 0.02;   //  Our audio clip is defined as: [overlay][audio data][overlap].
         private int audioOverlapLength = 0;         //  OVERLAP_TIME * audioFrequency.
         private int audioDataLength = 0;            //  (AUDIO_FRAME_SIZE + 2 * audioOverlapLength) * audioChannel.
         private float volume = 1.0f;
@@ -469,6 +469,7 @@ namespace HTC.UnityPlugin.Multimedia
                                 //  To simplify, the first overlap data would not be played.
                                 //  Correct the audio progress time by adding OVERLAP_TIME.
                                 audioProgressTime = firstAudioFrameTime + OVERLAP_TIME;
+                                globalStartTime = AudioSettings.dspTime - audioProgressTime;
                             }
 
                             while (audioSource[swapIndex].isPlaying || decoderState == DecoderState.SEEK_FRAME) { yield return null; }
@@ -565,7 +566,7 @@ namespace HTC.UnityPlugin.Multimedia
 
                 if (isAudioEnabled) {
                     lock (_lock) {
-                    audioDataBuff.Clear();
+	                    audioDataBuff.Clear();
                     }
                     audioProgressTime = firstAudioFrameTime = -1.0;
                     foreach (AudioSource src in audioSource) {
