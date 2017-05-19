@@ -109,7 +109,7 @@ namespace HTC.UnityPlugin.Multimedia
 			mesh.normals = normals;
 			mesh.uv = uvs;
 			mesh.triangles = triangles;
-			mesh.Optimize();
+			;
 			MeshRenderer renderer = gameObject.GetComponent<MeshRenderer>();
 			renderer.material.mainTexture = Texture2D.blackTexture;
 		}

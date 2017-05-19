@@ -96,7 +96,7 @@ namespace HTC.UnityPlugin.Multimedia
         [DllImport (NATIVE_LIBRARY_NAME)]
 		private static extern IntPtr GetRenderEventFunc();
 
-        private const string VERSION = "1.1.1.170217";
+        private const string VERSION = "1.1.2.170519";
 		public bool playOnAwake = false;
 		public string mediaPath = null;	            //	Assigned outside.
 		public UnityEvent onInitComplete = null;    //  Initialization is asynchronized. Invoked after initialization.
