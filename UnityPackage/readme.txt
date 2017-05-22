@@ -4,8 +4,8 @@ Quick start:
 0.	Download the FFmpeg 64 bits from http://dl4.htc.com/vive/ViveHomeSDK/FFmpeg-64bits.zip
 	If your Unity editor is 32 bits, you can download the FFmpeg official build from https://ffmpeg.zeranoe.com/builds/
 	Please notice that the license of FFmpeg official build is GPL and https is not default enabled.
-1.	Put the following dlls to project folder(ex. If your project is at D:\SampleProject\,
-												 you can put the dlls to D:\SampleProject\, C:\Program Files\Unity\Editor or beside *.exe)
+1.	Put the following dlls to the plugins folder(ex. If your project is at D:\SampleProject\,
+												 you can put the dlls to D:\SampleProject\Assets\MediaDecoder\Plugins\x64\)
 	- avcodec-57.dll
 	- avformat-57.dll
 	- avutil-55.dll
@@ -20,15 +20,15 @@ Quick start:
 		* Make sure your Unity editor and FFmpeg dlls are consistent with either 32 bits or 64 bits.
 		* Make sure FFmpeg dlls are placed in correct position.
 		Ex. If your project is located in D:\Sample\, the following directories should work:
-		D:\Sample\
 		D:\Sample\Assets\MediaDecoder\Plugins\x86_64\ or D:\Sample\Assets\MediaDecoder\Plugins\x86\
 		C:\Program Files\Unity\Editor\
 		Other system path in environment variables.
 	- Standalone build:
 		* Make sure your build settings and FFmpeg dlls are consistent with either 32 bits or 64 bits.
-		* Remember to copy FFmpeg dlls to the directory where the build can find.
+		* Remember to copy FFmpeg dlls to the directory where the build can find .
 		Ex. If your project is built to D:\Build\SampleApp.exe, the following directories should work:
 		D:\Build\
+		D:\Build\SampleApp_Data\Plugins\
 		Assign library loading path in your project.(please refer to Environment.SetEnvironmentVariable)
 		Other system path in environment variables.
 
@@ -170,6 +170,7 @@ Scenes:
 Change for v1.1.2:
 - Improve software decoding performance by multi-thread decoding.
 - Reduce audio playing artifact by enlarge overlap length.
+- Modify FFmpeg dlls directory description in readme.
 	
 Change for v1.1.1:
 - Fix seek function.
