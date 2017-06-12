@@ -398,9 +398,9 @@ void nativeLoadThumbnail(int id, float time, void* texY, void* texU, void* texV)
 	int height = videoInfo->height;
 
 	//	2.Get thumbnail data and update texture
+	avhandler->setSeekTime(time);
 	std::thread thumbnailThread([&]() {
 		uint8_t* yptr = NULL, *uptr = NULL, *vptr = NULL;
-		avhandler->setSeekTime(time);
 			
 		avhandler->getVideoFrame(&yptr, &uptr, &vptr);
 		while (yptr == NULL) {
@@ -419,6 +419,10 @@ void nativeLoadThumbnail(int id, float time, void* texY, void* texU, void* texV)
 		ctx->UpdateSubresource(d3dtex2, 0, NULL, vptr, width / 2, 0);
 		ctx->Release();
 	});
+	
+	if (thumbnailThread.joinable()) {
+		thumbnailThread.join();
+	}
 }
 
 int nativeGetMetaData(const char* filePath, char*** key, char*** value) {
