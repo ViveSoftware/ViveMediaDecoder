@@ -1,17 +1,17 @@
-﻿MediaDecoder for Unity - v1.1.3
+﻿ViveMediaDecoder for Unity - v1.1.4
 
 Quick start:
 0.	Download the FFmpeg 64 bits from http://dl4.htc.com/vive/ViveHomeSDK/FFmpeg-64bits.zip
 	If your Unity editor is 32 bits, you can download the FFmpeg official build from https://ffmpeg.zeranoe.com/builds/
 	Please notice that the license of FFmpeg official build is GPL and https is not default enabled.
 1.	Put the following dlls to the plugins folder(ex. If your project is at D:\SampleProject\,
-												 you can put the dlls to D:\SampleProject\Assets\MediaDecoder\Plugins\x64\)
+												 you can put the dlls to D:\SampleProject\Assets\ViveMediaDecoder\Plugins\x64\)
 	- avcodec-57.dll
 	- avformat-57.dll
 	- avutil-55.dll
 	- swresample-2.dll
 	- libeay32.dll
-2.	Create a model with MeshRenderer(ex.Quad) and attach MediaDecoder.cs as component.
+2.	Create a model with MeshRenderer(ex.Quad) and attach ViveMediaDecoder.cs as component.
 3.	Set MeshRenderer’s Material to YUV2RGBA and make sure the shader to be YUV2RGBA.(YUV2RGBA_linear is for linear color space)
 4.	Fill in video path(ex. D:\_Video\sample.mp4) and enable Play On Awake.
 5.	Click play, now you should be able to see the video playing on the model.
@@ -20,7 +20,7 @@ Quick start:
 		* Make sure your Unity editor and FFmpeg dlls are consistent with either 32 bits or 64 bits.
 		* Make sure FFmpeg dlls are placed in correct position.
 		Ex. If your project is located in D:\Sample\, the following directories should work:
-		D:\Sample\Assets\MediaDecoder\Plugins\x86_64\ or D:\Sample\Assets\MediaDecoder\Plugins\x86\
+		D:\Sample\Assets\ViveMediaDecoder\Plugins\x86_64\ or D:\Sample\Assets\ViveMediaDecoder\Plugins\x86\
 		C:\Program Files\Unity\Editor\
 		Other system path in environment variables.
 	- Standalone build:
@@ -98,7 +98,7 @@ API lists:
 	Get video current time(seconds).
 	
 - DecoderState getDecoderState():
-	Get decoder state. The states are defined in MediaDecoder.DecoderState.
+	Get decoder state. The states are defined in ViveMediaDecoder.DecoderState.
 	
 - void setPause():
 	Pause the video playing. It is available after initialization.
@@ -167,6 +167,9 @@ Scenes:
 	4. Set the Camera (right eye)'s Target Eye to Right, Culling Mask to uncheck LeftEye.
 	5. Modify the directory of each demo to your own path and click play.
 
+Change for v1.1.4:
+- Rename to ViveMediaDecoder.
+	
 Change for v1.1.3:
 - Fix thumbnail loading crash.
 

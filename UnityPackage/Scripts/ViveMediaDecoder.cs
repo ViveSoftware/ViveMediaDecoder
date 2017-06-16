@@ -11,9 +11,9 @@ using System.ComponentModel;
 namespace HTC.UnityPlugin.Multimedia
 {
 	[RequireComponent(typeof(MeshRenderer))]
-	public class MediaDecoder : MonoBehaviour
+	public class ViveMediaDecoder : MonoBehaviour
 	{
-		private const string NATIVE_LIBRARY_NAME = "MediaDecoder";
+		private const string NATIVE_LIBRARY_NAME = "ViveMediaDecoder";
 
         //  Decoder
         [DllImport(NATIVE_LIBRARY_NAME)]
@@ -96,7 +96,7 @@ namespace HTC.UnityPlugin.Multimedia
         [DllImport (NATIVE_LIBRARY_NAME)]
 		private static extern IntPtr GetRenderEventFunc();
 
-        private const string VERSION = "1.1.3.170612";
+        private const string VERSION = "1.1.4.170616";
 		public bool playOnAwake = false;
 		public string mediaPath = null;	            //	Assigned outside.
 		public UnityEvent onInitComplete = null;    //  Initialization is asynchronized. Invoked after initialization.
@@ -118,7 +118,7 @@ namespace HTC.UnityPlugin.Multimedia
 		private DecoderState decoderState = DecoderState.NOT_INITIALIZED;
 		private int decoderID = -1;
 
-		private const string LOG_TAG = "[MediaDecoder]";
+		private const string LOG_TAG = "[ViveMediaDecoder]";
 
 		public bool isVideoEnabled { get; private set; }
 		public bool isAudioEnabled { get; private set; }

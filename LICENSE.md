@@ -1,4 +1,4 @@
-﻿# MediaDecoder License
+﻿# ViveMediaDecoder License
 Copyright (c) 2015-2017 HTC Corporation. All Rights Reserved.
 
 This document describes a contract between you and HTC Corporation and 

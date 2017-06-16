@@ -6,7 +6,7 @@ using System.Collections;
 
 namespace HTC.UnityPlugin.Multimedia
 {
-	[RequireComponent(typeof(MediaDecoder))]
+	[RequireComponent(typeof(ViveMediaDecoder))]
 	public class VideoSourceController : MonoBehaviour {
 		protected string LOG_TAG = "[VideoSourceController]";
 
@@ -18,11 +18,11 @@ namespace HTC.UnityPlugin.Multimedia
 		protected bool isInitialized = false;
 		protected FileSeeker fileSeeker;
 
-		protected MediaDecoder decoder;
+		protected ViveMediaDecoder decoder;
 		protected Vector3 oriScale;
 
 		protected virtual void Start () {
-			decoder = GetComponent<MediaDecoder>();
+			decoder = GetComponent<ViveMediaDecoder>();
 			initFileSeeker();
 		}
 

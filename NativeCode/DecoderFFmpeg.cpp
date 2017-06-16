@@ -505,7 +505,7 @@ void DecoderFFmpeg::flushBuffer(std::list<AVFrame*>* frameBuff, std::mutex* mute
 	}
 }
 
-//	Record buffer state either FULL or EMPTY. It would be considered by MediaDecoder.cs for buffering judgement.
+//	Record buffer state either FULL or EMPTY. It would be considered by ViveMediaDecoder.cs for buffering judgement.
 void DecoderFFmpeg::updateBufferState() {
 	if (mVideoInfo.isEnabled) {
 		if (mVideoFrames.size() >= mVideoBuffMax) {

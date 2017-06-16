@@ -1,8 +1,8 @@
-MediaDecoder
+ViveMediaDecoder
 Copyright (c) 2015-2017, HTC Corporation. All rights reserved.
 
 ## Introduction:
-- MediaDecoder is a high performance video decoding Unity plugin for Windows
+- ViveMediaDecoder is a high performance video decoding Unity plugin for Windows
   which supports streaming multiple formats.
 
 - We also provide the samples for playing various video types which includes

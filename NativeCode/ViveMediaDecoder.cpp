@@ -1,7 +1,7 @@
 ﻿//========= Copyright 2015-2017, HTC Corporation. All rights reserved. ===========
 
 #include "Unity\IUnityGraphics.h"
-#include "MediaDecoder.h"
+#include "ViveMediaDecoder.h"
 #include "AVHandler.h"
 #include "Logger.h"
 #include "DX11TextureObject.h"
