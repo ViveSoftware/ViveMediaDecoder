@@ -1,4 +1,4 @@
-﻿ViveMediaDecoder for Unity - v1.1.4
+﻿ViveMediaDecoder for Unity - v1.1.5
 Copyright 2015-2017 HTC Corporation. All Rights Reserved.
 
 The works ("Work") refer to this software provided by HTC Corporation ("HTC") and published in Unity Store. 

@@ -1,4 +1,4 @@
-﻿ViveMediaDecoder for Unity - v1.1.4
+﻿ViveMediaDecoder for Unity - v1.1.5
 
 Quick start:
 0.	Download the FFmpeg 64 bits from http://dl4.htc.com/vive/ViveHomeSDK/FFmpeg-64bits.zip
@@ -167,6 +167,9 @@ Scenes:
 	4. Set the Camera (right eye)'s Target Eye to Right, Culling Mask to uncheck LeftEye.
 	5. Modify the directory of each demo to your own path and click play.
 
+Change for v1.1.5:
+- Modify native decoding thread number to auto detection.
+	
 Change for v1.1.4:
 - Rename to ViveMediaDecoder.
 	

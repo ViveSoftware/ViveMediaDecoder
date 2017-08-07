@@ -136,16 +136,16 @@ bool DecoderFFmpeg::init(const char* filePath) {
 		mVideoStream = mAVFormatContext->streams[videoStreamIndex];
 		mVideoCodecContext = mVideoStream->codec;
 		mVideoCodecContext->refcounted_frames = 1;
-		mVideoCodecContext->thread_count = 4;
-		mVideoCodecContext->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
 		mVideoCodec = avcodec_find_decoder(mVideoCodecContext->codec_id);
 		
 		if (mVideoCodec == NULL) {
 			LOG("Video codec not available. \n");
 			return false;
 		}
-
-		errorCode = avcodec_open2(mVideoCodecContext, mVideoCodec, NULL);
+		AVDictionary *autoThread = nullptr;
+		av_dict_set(&autoThread, "threads", "auto", 0);
+		errorCode = avcodec_open2(mVideoCodecContext, mVideoCodec, &autoThread);
+		av_dict_free(&autoThread);
 		if (errorCode < 0) {
 			LOG("Could not open video codec(%x). \n", errorCode);
 			printErrorMsg(errorCode);
