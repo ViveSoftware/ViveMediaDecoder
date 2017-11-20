@@ -1,8 +1,9 @@
 ﻿ViveMediaDecoder for Unity - v1.1.5
 
 Quick start:
-0.	Download the FFmpeg 64 bits from http://dl4.htc.com/vive/ViveHomeSDK/FFmpeg-64bits.zip
-	If your Unity editor is 32 bits, you can download the FFmpeg official build from https://ffmpeg.zeranoe.com/builds/
+0.	Download the FFmpeg 3.4:
+	- 64 bits: https://ffmpeg.zeranoe.com/builds/win64/shared/ffmpeg-3.4-win64-shared.zip
+	- 32 bits: https://ffmpeg.zeranoe.com/builds/win32/shared/ffmpeg-3.4-win32-shared.zip
 	Please notice that the license of FFmpeg official build is GPL and https is not default enabled.
 1.	Put the following dlls to the plugins folder(ex. If your project is at D:\SampleProject\,
 												 you can put the dlls to D:\SampleProject\Assets\ViveMediaDecoder\Plugins\x64\)
@@ -10,7 +11,6 @@ Quick start:
 	- avformat-57.dll
 	- avutil-55.dll
 	- swresample-2.dll
-	- libeay32.dll
 2.	Create a model with MeshRenderer(ex.Quad) and attach ViveMediaDecoder.cs as component.
 3.	Set MeshRenderer’s Material to YUV2RGBA and make sure the shader to be YUV2RGBA.(YUV2RGBA_linear is for linear color space)
 4.	Fill in video path(ex. D:\_Video\sample.mp4) and enable Play On Awake.
@@ -169,6 +169,7 @@ Scenes:
 
 Change for v1.1.5:
 - Modify native decoding thread number to auto detection.
+- Modify document for using FFmpeg 3.4 for the issue of playback broken building with Unity 2017.2f under Windows 10.
 	
 Change for v1.1.4:
 - Rename to ViveMediaDecoder.
