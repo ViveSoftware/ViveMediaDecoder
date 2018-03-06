@@ -4,6 +4,7 @@
 #include "IDecoder.h"
 #include <thread>
 #include <mutex>
+#include <memory>
  
 class AVHandler {
 public:
@@ -37,7 +38,7 @@ public:
 
 private:
 	DecoderState mDecoderState;
-	IDecoder* mIDecoder;
+	std::unique_ptr<IDecoder> mIDecoder;
 	double mSeekTime;
 	
 	std::thread mDecodeThread;

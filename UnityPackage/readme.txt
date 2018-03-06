@@ -1,4 +1,4 @@
-﻿ViveMediaDecoder for Unity - v1.1.5
+﻿ViveMediaDecoder for Unity - v1.1.6
 
 Quick start:
 0.	Download the FFmpeg 3.4:
@@ -12,7 +12,7 @@ Quick start:
 	- avutil-55.dll
 	- swresample-2.dll
 2.	Create a model with MeshRenderer(ex.Quad) and attach ViveMediaDecoder.cs as component.
-3.	Set MeshRenderer’s Material to YUV2RGBA and make sure the shader to be YUV2RGBA.(YUV2RGBA_linear is for linear color space)
+3.	Set MeshRenderer’s Material to YUV2RGBA and make sure the shader to be YUV2RGBA.
 4.	Fill in video path(ex. D:\_Video\sample.mp4) and enable Play On Awake.
 5.	Click play, now you should be able to see the video playing on the model.
 6.	If dll not found, check the followings:
@@ -167,30 +167,34 @@ Scenes:
 	4. Set the Camera (right eye)'s Target Eye to Right, Culling Mask to uncheck LeftEye.
 	5. Modify the directory of each demo to your own path and click play.
 
-Change for v1.1.5:
+Changes for v1.1.6:
+- Fix all audio channels mode state error.
+- Add color space check in shader and remove YUV2RGBA_linear.
+	
+Changes for v1.1.5:
 - Modify native decoding thread number to auto detection.
 - Modify document for using FFmpeg 3.4 for the issue of playback broken building with Unity 2017.2f under Windows 10.
 	
-Change for v1.1.4:
+Changes for v1.1.4:
 - Rename to ViveMediaDecoder.
 	
-Change for v1.1.3:
+Changes for v1.1.3:
 - Fix thumbnail loading crash.
 
-Change for v1.1.2:
+Changes for v1.1.2:
 - Improve software decoding performance by multi-thread decoding.
 - Reduce audio playing artifact by enlarge overlap length.
 - Modify FFmpeg dlls directory description in readme.
 	
-Change for v1.1.1:
+Changes for v1.1.1:
 - Fix seek function.
 	
-Change for v1.1.0:
+Changes for v1.1.0:
 - Modify native buffer management.
 - Modify audio play process for lower scheduling delay.
 - Open native config for seek function and buffer settings.
 	
-Change for v1.0.7:
+Changes for v1.0.7:
 - Add native config file for buffer size control, use TCP if streaming through RTSP.	
 - Fix RTSP playing fail.
 

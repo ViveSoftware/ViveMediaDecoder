@@ -5,50 +5,6 @@
 #include <fstream>
 #include <string>
 
-/*	Update log:
-*	2015.03.17 Move sws_scale to decode thread, so that render thread would not cost time to do type-transform.
-*	2015.04.01 Add error handling for re-initialize and re-start.
-*	2015.04.09 Add null check for pop video/audio frame.
-*	2015.04.14 Add API for control the A/V decoding.
-*	2015.04.17 Fix replay frame broken issue.
-*	2015.04.20 Fix the AVPicture release position when re-initialize. Otherwise it would cause glTexSubImage2D crash.
-*	2015.04.24 Fix the crash when audio stream not found.
-*	2015.04.27 Fix the output video frame resolution to fit the PBO using.
-*	2015.04.29 Expand to double buffer for smooth video play.
-*	2015.04.30 Fix the double-buffering index switch mechanism.
-*	2015.05.04 Modify to triple buffering.
-*	2015.05.13 Found memory leak. AVFrame should be av_frame_unref after not using. Add av_free_packet.
-*	2015.05.15 Fix a issue of reach databuffer == 0.
-*	2015.05.19 Fix memory leak of mutex, queue and AVPackets. Fix reinitialize error from target with audio to without audio.
-*	2015.05.21 Remove mutex, modify the audio data pop process to consist with video data pop.
-*	2015.06.05 Replace state-based bool with enum.
-*	2015.07.21 Fix video seek function and add api to query the state.
-*	2015.08.12 Replace AVPicture with AVFrame to avoid sws_scale.
-*	2015.08.14 Solve non sequential frames side effect of remove sws_scale by change VideoCodecContext.
-*	2015.08.24 Modify get audio total time for prevent *.avi time error.
-*	2015.08.27 Modify get duration flow.
-*	2015.08.28 Modify popAudio to output the audio data length.
-*	2016.01.04 Replace pthread with std::thread to reduce library dependency.
-*	2016.01.15 Fix error when video is disabled by add flag to decode thread.
-*	2016.02.16 Fix crash in pure audio case in seek function.
-*	2016.03.25 Fix seek crash by move seek process to decode thread.
-*	2016.03.25 Fix seek over 2000 value overflow issue.
-*	2016.03.30 Fix seek flow to avoid redundant wait.
-*	2016.05.02 Extract decoder interface and refactor FFmpeg decoding code.
-*	2016.05.04 Extract logger to singleton.
-*	2016.05.12 Fix pure video related bugs.
-*	2016.07.21 Fix audio jitter caused by video buffer blocking audio buffer.
-*	2016.07.25 Fix memory leak.
-*	2016.08.31 Refactor to dynamic buffering. Add BufferState which record either FULL or EMPTY state for buffering judgement.
-*	2016.09.08 Fix the issue of state error.
-*	2016.10.27 Add API to get all audio channels.
-*	2016.10.28 Fix 32 bits dll loading fail problem. Root cause: lack of module definition(*.def), it may be included only for 64 bits.
-*	2016.11.03 Fix seek occasionally crash. Root cause: multi-thread race condition to operate buffer.
-*	2016.11.04 Fix performance issue that lock_guard too much.
-*	2016.11.16 Add native config file loading.
-*	2017.01.17 Separate video/audio buffer and mutex.
-*/
-
 DecoderFFmpeg::DecoderFFmpeg() {
 	mAVFormatContext = NULL;
 	mVideoStream = NULL;
@@ -158,7 +114,7 @@ bool DecoderFFmpeg::init(const char* filePath) {
 		mVideoInfo.height = mVideoCodecContext->height;
 		mVideoInfo.totalTime = mVideoStream->duration <= 0 ? ctxDuration : mVideoStream->duration * av_q2d(mVideoStream->time_base);
 
-		mVideoFrames.clear();
+		mVideoFrames.swap(decltype(mVideoFrames)());
 	}
 
 	/* Audio initialization */
@@ -191,7 +147,7 @@ bool DecoderFFmpeg::init(const char* filePath) {
 			return false;
 		}
 
-		mAudioFrames.clear();
+		mAudioFrames.swap(decltype(mAudioFrames)());
 	}
 
 	mIsInitialized = true;
@@ -451,7 +407,7 @@ void DecoderFFmpeg::updateVideoFrame() {
 
 	if (isFrameAvailable) {
 		std::lock_guard<std::mutex> lock(mVideoMutex);
-		mVideoFrames.push_back(frame);
+		mVideoFrames.push(frame);
 	}
 }
 
@@ -471,7 +427,7 @@ void DecoderFFmpeg::updateAudioFrame() {
 	swr_convert_frame(mSwrContext, frame, frameDecoded);
 
 	std::lock_guard<std::mutex> lock(mAudioMutex);
-	mAudioFrames.push_back(frame);
+	mAudioFrames.push(frame);
 	av_frame_free(&frameDecoded);
 }
 
@@ -483,7 +439,7 @@ void DecoderFFmpeg::freeAudioFrame() {
 	freeFrontFrame(&mAudioFrames, &mAudioMutex);
 }
 
-void DecoderFFmpeg::freeFrontFrame(std::list<AVFrame*>* frameBuff, std::mutex* mutex) {
+void DecoderFFmpeg::freeFrontFrame(std::queue<AVFrame*>* frameBuff, std::mutex* mutex) {
 	std::lock_guard<std::mutex> lock(*mutex);
 	if (!mIsInitialized || frameBuff->size() == 0) {
 		LOG("Not initialized or buffer empty. \n");
@@ -492,16 +448,16 @@ void DecoderFFmpeg::freeFrontFrame(std::list<AVFrame*>* frameBuff, std::mutex* m
 
 	AVFrame* frame = frameBuff->front();
 	av_frame_free(&frame);
-	frameBuff->pop_front();
+	frameBuff->pop();
 	updateBufferState();
 }
 
 //	frameBuff.clear would only clean the pointer rather than whole resources. So we need to clear frameBuff by ourself.
-void DecoderFFmpeg::flushBuffer(std::list<AVFrame*>* frameBuff, std::mutex* mutex) {
+void DecoderFFmpeg::flushBuffer(std::queue<AVFrame*>* frameBuff, std::mutex* mutex) {
 	std::lock_guard<std::mutex> lock(*mutex);
 	while (!frameBuff->empty()) {
 		av_frame_free(&(frameBuff->front()));
-		frameBuff->pop_front();
+		frameBuff->pop();
 	}
 }
 

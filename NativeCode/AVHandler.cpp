@@ -7,7 +7,7 @@
 AVHandler::AVHandler() {
 	mDecoderState = UNINITIALIZED;
 	mSeekTime = 0.0;
-	mIDecoder = new DecoderFFmpeg();
+	mIDecoder = std::make_unique<DecoderFFmpeg>();
 }
 
 void AVHandler::init(const char* filePath) {
@@ -28,10 +28,7 @@ void AVHandler::stopDecoding() {
 		mDecodeThread.join();
 	}
 
-	if (mIDecoder != NULL) {
-		delete mIDecoder;
-		mIDecoder = NULL;
-	}
+	mIDecoder = NULL;
 	mDecoderState = UNINITIALIZED;
 }
 

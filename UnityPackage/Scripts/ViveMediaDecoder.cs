@@ -96,7 +96,7 @@ namespace HTC.UnityPlugin.Multimedia
         [DllImport (NATIVE_LIBRARY_NAME)]
 		private static extern IntPtr GetRenderEventFunc();
 
-        private const string VERSION = "1.1.5.170807";
+        private const string VERSION = "1.1.6.180306";
 		public bool playOnAwake = false;
 		public string mediaPath = null;	            //	Assigned outside.
 		public UnityEvent onInitComplete = null;    //  Initialization is asynchronized. Invoked after initialization.
@@ -227,7 +227,7 @@ namespace HTC.UnityPlugin.Multimedia
 			}
 
 			if (isVideoEnabled || isAudioEnabled) {
-				if ((!isVideoEnabled || isVideoReadyToReplay) && (!isAudioEnabled || isAudioReadyToReplay)) {
+				if ((!isVideoEnabled || isVideoReadyToReplay) && (!isAudioEnabled || isAllAudioChEnabled || isAudioReadyToReplay)) {
                     decoderState = DecoderState.EOF;
                     isVideoReadyToReplay = isAudioReadyToReplay = false;
 
@@ -518,7 +518,7 @@ namespace HTC.UnityPlugin.Multimedia
 				print (LOG_TAG + " stop decoding.");
 				decoderState = DecoderState.STOP;
 				ReleaseTexture();
-				if (isAudioEnabled) {
+				if (isAudioEnabled && !isAllAudioChEnabled) {
 					StopCoroutine ("audioPlay");
                     backgroundWorker.CancelAsync();
 
@@ -537,7 +537,7 @@ namespace HTC.UnityPlugin.Multimedia
 				decoderID = -1;
 				decoderState = DecoderState.NOT_INITIALIZED;
 
-				isVideoEnabled = isAudioEnabled = false;
+				isVideoEnabled = isAudioEnabled = isAllAudioChEnabled = false;
 				isVideoReadyToReplay = isAudioReadyToReplay = false;
                 isAllAudioChEnabled = false;
             }
@@ -550,7 +550,7 @@ namespace HTC.UnityPlugin.Multimedia
 
                 float setTime = 0.0f;
                 if ((isVideoEnabled && seekTime > videoTotalTime) ||
-                    (isAudioEnabled && seekTime > audioTotalTime) ||
+                    (isAudioEnabled && !isAllAudioChEnabled && seekTime > audioTotalTime) ||
                     isVideoReadyToReplay || isAudioReadyToReplay ||
                     seekTime < 0.0f) {
                     print(LOG_TAG + " Seek over end. ");
@@ -564,7 +564,7 @@ namespace HTC.UnityPlugin.Multimedia
                 nativeSetSeekTime(decoderID, setTime);
                 nativeSetVideoTime(decoderID, (float) setTime);
 
-                if (isAudioEnabled) {
+                if (isAudioEnabled && !isAllAudioChEnabled) {
                     lock (_lock) {
 	                    audioDataBuff.Clear();
                     }
@@ -623,7 +623,7 @@ namespace HTC.UnityPlugin.Multimedia
 			if (decoderState == DecoderState.START) {
 				hangTime = AudioSettings.dspTime - globalStartTime;
 				decoderState = DecoderState.PAUSE;
-				if (isAudioEnabled) {
+				if (isAudioEnabled && !isAllAudioChEnabled) {
 					foreach (AudioSource src in audioSource) {
 						src.Pause();
 					}
@@ -635,7 +635,7 @@ namespace HTC.UnityPlugin.Multimedia
 			if (decoderState == DecoderState.PAUSE) {
 				globalStartTime = AudioSettings.dspTime - hangTime;
 				decoderState = DecoderState.START;
-				if (isAudioEnabled) {
+				if (isAudioEnabled && !isAllAudioChEnabled) {
 					foreach (AudioSource src in audioSource) {
 						src.UnPause();
 					}

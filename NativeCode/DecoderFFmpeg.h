@@ -2,7 +2,7 @@
 
 #pragma once
 #include "IDecoder.h"
-#include <list>
+#include <queue>
 #include <mutex>
 
 extern "C" {
@@ -47,8 +47,8 @@ private:
 	AVCodecContext*	mAudioCodecContext;
 
 	AVPacket	mPacket;
-	std::list<AVFrame*> mVideoFrames;
-	std::list<AVFrame*> mAudioFrames;
+	std::queue<AVFrame*> mVideoFrames;
+	std::queue<AVFrame*> mAudioFrames;
 	unsigned int mVideoBuffMax;
 	unsigned int mAudioBuffMax;
 
@@ -64,8 +64,8 @@ private:
 	bool isBuffBlocked();
 	void updateVideoFrame();
 	void updateAudioFrame();
-	void freeFrontFrame(std::list<AVFrame*>* frameBuff, std::mutex* mutex);
-	void flushBuffer(std::list<AVFrame*>* frameBuff, std::mutex* mutex);
+	void freeFrontFrame(std::queue<AVFrame*>* frameBuff, std::mutex* mutex);
+	void flushBuffer(std::queue<AVFrame*>* frameBuff, std::mutex* mutex);
 	std::mutex mVideoMutex;
 	std::mutex mAudioMutex;
 	

@@ -1,4 +1,6 @@
-﻿//========= Copyright 2015-2018, HTC Corporation. All rights reserved. ===========
+﻿// Upgrade NOTE: replaced 'mul(UNITY_MATRIX_MVP,*)' with 'UnityObjectToClipPos(*)'
+
+//========= Copyright 2015-2018, HTC Corporation. All rights reserved. ===========
 
 Shader "Unlit/YUV2RGBA"
 {
@@ -46,24 +48,27 @@ Shader "Unlit/YUV2RGBA"
 			v2f vert (appdata v)
 			{
 				v2f o;
-				o.vertex = mul(UNITY_MATRIX_MVP, v.vertex);
-				o.uv = TRANSFORM_TEX(v.uv, _MainTex);
+				o.vertex = UnityObjectToClipPos(v.vertex);
+				o.uv = TRANSFORM_TEX(float2(v.uv.x, 1.0 - v.uv.y), _MainTex);
 				UNITY_TRANSFER_FOG(o,o.vertex);
 				return o;
 			}
 			
 			fixed4 frag (v2f i) : SV_Target
 			{
-				float2 inv_uv = float2(i.uv.x, 1.0 - i.uv.y);
-				float ych = tex2D(_YTex, inv_uv).a;
-				float uch = tex2D(_UTex, inv_uv).a * 0.872 - 0.436;		//	Scale from 0 ~ 1 to -0.436 ~ +0.436
-				float vch = tex2D(_VTex, inv_uv).a * 1.230 - 0.615;		//	Scale from 0 ~ 1 to -0.615 ~ +0.615
+				float ych = tex2D(_YTex, i.uv).a;
+				float uch = tex2D(_UTex, i.uv).a * 0.872 - 0.436;		//	Scale from 0 ~ 1 to -0.436 ~ +0.436
+				float vch = tex2D(_VTex, i.uv).a * 1.230 - 0.615;		//	Scale from 0 ~ 1 to -0.615 ~ +0.615
 				/*	BT.601	*/
-				float rch = clamp(ych + 1.13983 * vch, 0.0, 1.0);
-				float gch = clamp(ych - 0.39465 * uch - 0.58060 * vch, 0.0, 1.0);
-				float bch = clamp(ych + 2.03211 * uch, 0.0, 1.0);
+				float rch = ych + 1.13983 * vch;
+				float gch = ych - 0.39465 * uch - 0.58060 * vch;
+				float bch = ych + 2.03211 * uch;
 				
-				fixed4 col = fixed4(rch, gch, bch, 1.0);
+				fixed4 col = clamp(fixed4(rch, gch, bch, 1.0), 0.0, 1.0);
+
+				if(!IsGammaSpace()) {	//	If linear space.
+					col = pow(col, 2.2);
+				}
 
 				UNITY_APPLY_FOG(i.fogCoord, col);
 				return col;
