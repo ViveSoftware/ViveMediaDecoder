@@ -1,5 +1,5 @@
 ViveMediaDecoder
-Copyright (c) 2015-2018, HTC Corporation. All rights reserved.
+Copyright (c) 2015-2019, HTC Corporation. All rights reserved.
 
 ## Introduction:
 - ViveMediaDecoder is a high performance video decoding Unity plugin for Windows

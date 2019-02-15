@@ -1,4 +1,4 @@
-﻿ViveMediaDecoder for Unity - v1.1.6
+﻿ViveMediaDecoder for Unity - v1.1.7
 
 Quick start:
 0.	Download the FFmpeg 3.4:
@@ -167,6 +167,10 @@ Scenes:
 	4. Set the Camera (right eye)'s Target Eye to Right, Culling Mask to uncheck LeftEye.
 	5. Modify the directory of each demo to your own path and click play.
 
+Changes for v1.1.7:
+- Fix imprecision buffer state.
+- Fix the issue of lost end frame.
+	
 Changes for v1.1.6:
 - Fix all audio channels mode state error.
 - Add color space check in shader and remove YUV2RGBA_linear.

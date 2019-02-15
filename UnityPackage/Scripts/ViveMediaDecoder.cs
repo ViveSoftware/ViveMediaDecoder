@@ -1,4 +1,4 @@
-//========= Copyright 2015-2018, HTC Corporation. All rights reserved. ===========
+//========= Copyright 2015-2019, HTC Corporation. All rights reserved. ===========
 
 using UnityEngine;
 using UnityEngine.Events;
@@ -96,7 +96,7 @@ namespace HTC.UnityPlugin.Multimedia
         [DllImport (NATIVE_LIBRARY_NAME)]
 		private static extern IntPtr GetRenderEventFunc();
 
-        private const string VERSION = "1.1.6.180306";
+        private const string VERSION = "1.1.7.190215";
 		public bool playOnAwake = false;
 		public string mediaPath = null;	            //	Assigned outside.
 		public UnityEvent onInitComplete = null;    //  Initialization is asynchronized. Invoked after initialization.
@@ -191,7 +191,12 @@ namespace HTC.UnityPlugin.Multimedia
 								GL.IssuePluginEvent(GetRenderEventFunc(), decoderID);
 							}
 						} else {
-							isVideoReadyToReplay = true;
+                            if (!nativeIsVideoBufferEmpty(decoderID)) {
+                                nativeSetVideoTime(decoderID, (float)setTime);
+                                GL.IssuePluginEvent(GetRenderEventFunc(), decoderID);
+                            } else {
+                                isVideoReadyToReplay = true;
+                            }
 						}
 					}
 

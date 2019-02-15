@@ -1,4 +1,4 @@
-//========= Copyright 2015-2018, HTC Corporation. All rights reserved. ===========
+//========= Copyright 2015-2019, HTC Corporation. All rights reserved. ===========
 
 #include "DecoderFFmpeg.h"
 #include "Logger.h"
@@ -163,6 +163,7 @@ bool DecoderFFmpeg::decode() {
 
 	if (!isBuffBlocked()) {
 		if (av_read_frame(mAVFormatContext, &mPacket) < 0) {
+			updateVideoFrame();
 			LOG("End of file.\n");
 			return false;
 		}
@@ -174,7 +175,6 @@ bool DecoderFFmpeg::decode() {
 		}
 
 		av_packet_unref(&mPacket);
-		updateBufferState();
 	}
 
 	return true;
@@ -408,6 +408,7 @@ void DecoderFFmpeg::updateVideoFrame() {
 	if (isFrameAvailable) {
 		std::lock_guard<std::mutex> lock(mVideoMutex);
 		mVideoFrames.push(frame);
+		updateBufferState();
 	}
 }
 
@@ -428,6 +429,7 @@ void DecoderFFmpeg::updateAudioFrame() {
 
 	std::lock_guard<std::mutex> lock(mAudioMutex);
 	mAudioFrames.push(frame);
+	updateBufferState();
 	av_frame_free(&frameDecoded);
 }
 

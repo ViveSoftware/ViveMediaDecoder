@@ -1,4 +1,4 @@
-﻿//========= Copyright 2015-2018, HTC Corporation. All rights reserved. ===========
+﻿//========= Copyright 2015-2019, HTC Corporation. All rights reserved. ===========
 
 using UnityEngine;
 using System.IO;
